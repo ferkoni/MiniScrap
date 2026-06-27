@@ -1,6 +1,15 @@
 require_relative "boot"
 
-require "rails/all"
+require "rails"
+# Pick the frameworks you want. This API has no database, so Active Record and
+# the engines that depend on it (Active Storage, Action Mailbox, Action Text)
+# are intentionally omitted.
+require "active_model/railtie"
+require "active_job/railtie"
+require "action_controller/railtie"
+require "action_mailer/railtie"
+require "action_view/railtie"
+require "action_cable/engine"
 
 # Require the gems listed in Gemfile, including any gems
 # you've limited to :test, :development, or :production.
@@ -15,9 +24,6 @@ module MiniScrap
     # Middleware like session, flash, cookies can be added back manually.
     # Skip views, helpers and assets when generating a new resource.
     config.api_only = true
-
-    # No image uploads in this API; the image_processing gem is not bundled.
-    config.active_storage.variant_processor = :disabled
 
     # Please, add to the `ignore` list any other `lib` subdirectories that do
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
