@@ -29,7 +29,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     first = response.parsed_body["results"].first
     expect(first.keys).to contain_exactly("title", "price", "availability", "url", "position")
     expect(first).to include(
-      "title"    => "PlayStation 5 Console",
+      "title" => "PlayStation 5 Console",
       "position" => 1
     )
   end

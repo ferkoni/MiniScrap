@@ -8,9 +8,9 @@ module Scraper
   class NisseiParser
     include Parser
 
-    CARD_SELECTORS         = [ ".product-item", "li.item.product" ].freeze
-    TITLE_SELECTORS        = [ ".product-item-link", ".product-item-name a" ].freeze
-    PRICE_SELECTORS        = [ ".price", ".price-box .price" ].freeze
+    CARD_SELECTORS = [ ".product-item", "li.item.product" ].freeze
+    TITLE_SELECTORS = [ ".product-item-link", ".product-item-name a" ].freeze
+    PRICE_SELECTORS = [ ".price", ".price-box .price" ].freeze
     AVAILABILITY_SELECTORS = [ ".stock", ".availability" ].freeze
 
     def parse(html)
@@ -18,11 +18,11 @@ module Scraper
       cards(doc).each_with_index.map do |card, index|
         link = first_match(card, TITLE_SELECTORS)
         Result.new(
-          title:        text(link),
-          price:        text(first_match(card, PRICE_SELECTORS)),
+          title: text(link),
+          price: text(first_match(card, PRICE_SELECTORS)),
           availability: text(first_match(card, AVAILABILITY_SELECTORS)),
-          url:          link&.[]("href"),
-          position:     index + 1
+          url: link&.[]("href"),
+          position: index + 1
         )
       end
     end
