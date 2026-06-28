@@ -4,9 +4,12 @@ require "rails_helper"
 RSpec.describe "GET /api/v1/nissei/search", type: :request do
   let(:html) { Rails.root.join("spec/fixtures/nissei_search.html").read }
 
+  # The slice-1 `fetcher` hook builds a Scraper::FakeFetcher; stub that one
+  # construction point to return a fetcher primed with the fixture, rather than
+  # reaching into an instance with allow_any_instance_of.
   before do
     fake = Scraper::FakeFetcher.new(body: html)
-    allow_any_instance_of(Api::V1::NisseiController).to receive(:fetcher).and_return(fake)
+    allow(Scraper::FakeFetcher).to receive(:new).and_return(fake)
   end
 
   it "returns 200 with the JSON contract" do

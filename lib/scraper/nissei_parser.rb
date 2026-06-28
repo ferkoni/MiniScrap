@@ -29,13 +29,13 @@ module Scraper
 
     private
 
-    # The first selector that matches any cards wins; an empty list otherwise.
+    # The first selector that matches any cards wins; an empty NodeSet otherwise.
     def cards(doc)
       CARD_SELECTORS.each do |selector|
         found = doc.css(selector)
         return found if found.any?
       end
-      Nokogiri::XML::NodeSet.new(doc)
+      Nokogiri::XML::NodeSet.new(doc, [])
     end
 
     def first_match(node, selectors)
