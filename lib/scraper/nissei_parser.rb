@@ -8,9 +8,9 @@ module Scraper
   class NisseiParser
     include Parser
 
-    CARD_SELECTORS         = [ ".product-item", "li.item.product" ].freeze
-    TITLE_SELECTORS        = [ ".product-item-link", ".product-item-name a" ].freeze
-    PRICE_SELECTORS        = [ ".price", ".price-box .price" ].freeze
+    CARD_SELECTORS = [ ".product-item", "li.item.product" ].freeze
+    TITLE_SELECTORS = [ ".product-item-link", ".product-item-name a" ].freeze
+    PRICE_SELECTORS = [ ".price", ".price-box .price" ].freeze
     AVAILABILITY_SELECTORS = [ ".stock", ".availability" ].freeze
 
     def parse(html)
@@ -18,24 +18,24 @@ module Scraper
       cards(doc).each_with_index.map do |card, index|
         link = first_match(card, TITLE_SELECTORS)
         Result.new(
-          title:        text(link),
-          price:        text(first_match(card, PRICE_SELECTORS)),
+          title: text(link),
+          price: text(first_match(card, PRICE_SELECTORS)),
           availability: text(first_match(card, AVAILABILITY_SELECTORS)),
-          url:          link&.[]("href"),
-          position:     index + 1
+          url: link&.[]("href"),
+          position: index + 1
         )
       end
     end
 
     private
 
-    # The first selector that matches any cards wins; an empty list otherwise.
+    # The first selector that matches any cards wins; an empty NodeSet otherwise.
     def cards(doc)
       CARD_SELECTORS.each do |selector|
         found = doc.css(selector)
         return found if found.any?
       end
-      Nokogiri::XML::NodeSet.new(doc)
+      Nokogiri::XML::NodeSet.new(doc, [])
     end
 
     def first_match(node, selectors)

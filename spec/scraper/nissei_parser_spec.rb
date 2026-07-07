@@ -13,11 +13,11 @@ RSpec.describe Scraper::NisseiParser do
 
   it "extracts title, price, availability, url and position from a card" do
     expect(results.first).to have_attributes(
-      title:        "PlayStation 5 Console",
-      price:        "Gs. 4.500.000",
+      title: "PlayStation 5 Console",
+      price: "Gs. 4.500.000",
       availability: "En stock",
-      url:          "https://nissei.com/py/product/ps5-console",
-      position:     1
+      url: "https://nissei.com/py/product/ps5-console",
+      position: 1
     )
   end
 

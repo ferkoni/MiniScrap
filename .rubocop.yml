@@ -2,7 +2,18 @@
 inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
 # Overwrite or add rules to create your own house style
-#
+
+# House style: no vertical alignment padding. One space after `=`, `:`, `=>`.
+# `rubocop -a` collapses any alignment automatically.
+Layout/ExtraSpacing:
+  Enabled: true
+  AllowForAlignment: false
+
+Layout/HashAlignment:
+  Enabled: true
+  EnforcedHashRocketStyle: key
+  EnforcedColonStyle: key
+
 # # Use `[a, [b, c]]` not `[ a, [ b, c ] ]`
 # Layout/SpaceInsideArrayLiteralBrackets:
 #   Enabled: false
