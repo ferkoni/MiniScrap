@@ -7,10 +7,10 @@ RSpec.describe Scraper::ScrapeFlow do
   let(:fetcher) { Scraper::FakeFetcher.new(body: html) }
   let(:site) do
     Scraper::Site.new(
-      id:       "nissei",
+      id: "nissei",
       base_url: "https://nissei.com/py/",
-      profile:  :chrome131,
-      parser:   Scraper::NisseiParser.new
+      profile: :chrome131,
+      parser: Scraper::NisseiParser.new
     )
   end
 

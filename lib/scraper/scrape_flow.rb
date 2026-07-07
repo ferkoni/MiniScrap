@@ -13,16 +13,16 @@ module Scraper
     end
 
     def run(path)
-      started  = monotonic_ms
+      started = monotonic_ms
       response = @fetcher.fetch(@site.url_for(path), ua: nil, cookies: {}, headers: {})
-      results  = @site.parser.parse(response.body)
+      results = @site.parser.parse(response.body)
 
       ScrapeResult.new(
-        site:         @site.id,
-        results:      results,
+        site: @site.id,
+        results: results,
         browser_used: false,
-        latency_ms:   (monotonic_ms - started).round,
-        degraded:     nil  # zero-products structural-anomaly detection arrives in slice #7
+        latency_ms: (monotonic_ms - started).round,
+        degraded: nil # zero-products structural-anomaly detection arrives in slice #7
       )
     end
 

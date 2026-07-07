@@ -6,8 +6,8 @@ module Api
     class NisseiController < ScrapeController
       scrapes "nissei",
         base_url: "https://nissei.com/py/",
-        profile:  :chrome131,
-        parser:   Scraper::NisseiParser.new
+        profile: :chrome131,
+        parser: Scraper::NisseiParser.new
 
       def search
         scrape("search?q=#{CGI.escape(params[:q].to_s)}")

@@ -11,10 +11,10 @@ module Api
       # Class-level DSL: declares the one Site this controller scrapes.
       def self.scrapes(id, base_url:, profile:, parser:)
         self.site = Scraper::Site.new(
-          id:       id,
+          id: id,
           base_url: base_url,
-          profile:  profile,
-          parser:   parser
+          profile: profile,
+          parser: parser
         )
       end
 
@@ -37,11 +37,11 @@ module Api
 
       def serialize(result)
         {
-          site:         result.site,
-          results:      result.results.map(&:to_h),
+          site: result.site,
+          results: result.results.map(&:to_h),
           browser_used: result.browser_used,
-          latency_ms:   result.latency_ms,
-          degraded:     result.degraded
+          latency_ms: result.latency_ms,
+          degraded: result.degraded
         }
       end
     end
