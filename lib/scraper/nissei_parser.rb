@@ -8,10 +8,10 @@ module Scraper
   class NisseiParser
     include Parser
 
-    CARD_SELECTORS = [ ".product-item", "li.item.product" ].freeze
-    TITLE_SELECTORS = [ ".product-item-link", ".product-item-name a" ].freeze
-    PRICE_SELECTORS = [ ".price", ".price-box .price" ].freeze
-    AVAILABILITY_SELECTORS = [ ".stock", ".availability" ].freeze
+    CARD_SELECTORS = [".product-item", "li.item.product"].freeze
+    TITLE_SELECTORS = [".product-item-link", ".product-item-name a"].freeze
+    PRICE_SELECTORS = [".price", ".price-box .price"].freeze
+    AVAILABILITY_SELECTORS = [".stock", ".availability"].freeze
 
     def parse(html)
       doc = Nokogiri::HTML(html)

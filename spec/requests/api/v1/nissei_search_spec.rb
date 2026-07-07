@@ -40,4 +40,26 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     get "/api/v1/amazon/search", params: { q: "ps5" }
     expect(response).to have_http_status(:not_found)
   end
+
+  # A challenged fetch has no solver wired in this slice, so the flow raises
+  # UnsupportedChallenge and the controller maps it to an honest 501.
+  context "when the fetch is challenged and no solver is registered" do
+    before do
+      # The outer `before` already stubs FakeFetcher.new, so build the challenged
+      # fetcher as a verified double rather than through the stubbed constructor.
+      challenged = Scraper::Response.new(status: 403, headers: {}, body: "Just a moment...")
+      fetcher = instance_double(Scraper::FakeFetcher, fetch: challenged)
+      allow(Scraper::FakeFetcher).to receive(:new).and_return(fetcher)
+    end
+
+    it "returns 501 with the challenge kind" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:not_implemented)
+      expect(response.parsed_body).to eq(
+        "error" => "unsupported_challenge",
+        "kind" => "cloudflare_js"
+      )
+    end
+  end
 end

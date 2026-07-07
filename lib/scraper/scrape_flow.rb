@@ -3,18 +3,27 @@ module Scraper
   # interfaces and *returns* a ScrapeResult (or raises) — it knows nothing about
   # Rails, JSON, or HTTP.
   #
-  # This slice implements only the fast path: fetch -> parse -> return. Challenge
-  # detection, the ClearanceStore, and the routed solve arrive in later slices
-  # and slot in between the fetch and the parse without changing this contract.
+  # This slice runs fetch -> detect -> parse -> return. A detected challenge has
+  # no solver wired yet, so it is raised as UnsupportedChallenge; the reactive
+  # solve + retry and the ClearanceStore arrive in later slices and slot in
+  # between detection and the parse without changing this contract.
   class ScrapeFlow
-    def initialize(site:, fetcher:)
+    def initialize(site:, fetcher:, detector:)
       @site = site
       @fetcher = fetcher
+      @detector = detector
     end
 
     def run(path)
       started = monotonic_ms
       response = @fetcher.fetch(@site.url_for(path), ua: nil, cookies: {}, headers: {})
+
+      if (challenge = @detector.detect(response))
+        # No solver is registered in this slice, so any detected challenge is
+        # unsupported; slice #3 routes it through a SolverRegistry instead.
+        raise UnsupportedChallenge, challenge.kind
+      end
+
       results = @site.parser.parse(response.body)
 
       ScrapeResult.new(

@@ -22,7 +22,7 @@ RSpec.describe Scraper::NisseiParser do
   end
 
   it "numbers positions 1-based in document order" do
-    expect(results.map(&:position)).to eq([ 1, 2, 3 ])
+    expect(results.map(&:position)).to eq([1, 2, 3])
   end
 
   it "returns an empty list when no cards are present" do
