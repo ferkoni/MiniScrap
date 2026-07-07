@@ -7,15 +7,14 @@ RSpec.describe Scraper::ScrapeFlow do
   let(:fetcher) { Scraper::FakeFetcher.new(body: html) }
   let(:site) do
     Scraper::Site.new(
-      id:          "nissei",
-      base_url:    "https://nissei.com/py/",
-      profile:     :chrome131,
-      parser:      Scraper::NisseiParser.new,
-      search_path: ->(q) { "search?q=#{CGI.escape(q)}" }
+      id:       "nissei",
+      base_url: "https://nissei.com/py/",
+      profile:  :chrome131,
+      parser:   Scraper::NisseiParser.new
     )
   end
 
-  subject(:result) { described_class.new(site: site, fetcher: fetcher).run("ps5") }
+  subject(:result) { described_class.new(site: site, fetcher: fetcher).run("search?q=ps5") }
 
   it "returns a ScrapeResult for the site" do
     expect(result).to be_a(Scraper::ScrapeResult)

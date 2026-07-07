@@ -14,10 +14,11 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
 
     expect(response).to have_http_status(:ok)
     body = response.parsed_body
-    expect(body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms")
+    expect(body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
     expect(body["site"]).to eq("nissei")
     expect(body["browser_used"]).to be(false)
     expect(body["latency_ms"]).to be_a(Numeric)
+    expect(body["degraded"]).to be_nil
   end
 
   it "shapes each result with the product-card fields" do
