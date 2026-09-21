@@ -81,9 +81,9 @@ With no valid cookie, N simultaneous requests would naively launch N browsers. T
 RAM-crushing, and looks like an attack. `ClearanceStore` does a **per-key single-flight** solve:
 
 ```
-ps5 ──┐                 ps5 leads the "nissei" flight ──► ONE browser solve
-xbox ─┼─ no cookie ──►  xbox, switch wait on that flight
-tv ───┘                 solve lands ──► all three retry the fast path with the same clearance
+ps5 ────┐               ps5 leads the "nissei" flight ──► ONE browser solve
+xbox ───┼─ no cookie ─► xbox, switch wait on that flight
+switch ─┘               solve lands ──► all three retry the fast path with the same clearance
 ```
 
 - **Per key, not global.** A short mutex guards only the bookkeeping (one `Concurrent::Promises`
