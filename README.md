@@ -277,6 +277,7 @@ Tests run fully offline: the fast path is injected, and FlareSolverr is stubbed 
 don't need Docker or curl-impersonate for them.
 
 ```bash
+bin/ci                                # everything below in one go, as GitHub Actions runs it
 bundle exec rspec                     # the suite CI runs
 bin/rubocop                           # style
 bin/brakeman --no-pager               # security scan
@@ -289,5 +290,5 @@ The `:live` specs hit the real network, so they're opt-in and never run in CI. T
 LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real solve against nissei
 ```
 
-The live solver spec also refreshes `spec/fixtures/nissei_results.html`, the real captured page the
-parser is tested against. Keep live runs rare (see *Ethics* above).
+The live solver spec also refreshes `spec/fixtures/nissei_results.html`, one of the two real
+captured pages the parser is tested against (the other is `nissei_results_asus.html`). Keep live runs rare (see *Ethics* above).
