@@ -8,12 +8,22 @@ module Api
     class ScrapeController < ApplicationController
       class_attribute :site, instance_accessor: false
 
+      # The one ClearanceStore for the whole process, shared by every site
+      # controller and every request so a solved clearance outlives the request
+      # that solved it (a store per request would re-solve every time). Its
+      # registry routes :cloudflare_js to the StubSolver until slice #6 wires
+      # FlareSolverrSolver.
+      class_attribute :clearance_store, instance_accessor: false, default: Scraper::ClearanceStore.new(
+        registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::StubSolver.new)
+      )
+
       # Flow error -> HTTP status. This is the edge's single source of truth for
       # mapping raised Scraper::Errors onto responses; later slices add their
-      # entries here (SolveFailed/RetryBudgetExhausted -> 502, SolveTimeout ->
-      # 504) without touching the Rails-free core.
+      # entries here (SolveFailed -> 502, SolveTimeout -> 504) without touching
+      # the Rails-free core.
       ERROR_STATUS = {
-        Scraper::UnsupportedChallenge => :not_implemented
+        Scraper::UnsupportedChallenge => :not_implemented,
+        Scraper::RetryBudgetExhausted => :bad_gateway
       }.freeze
 
       rescue_from Scraper::Error do |error|
@@ -39,7 +49,8 @@ module Api
         result = Scraper::ScrapeFlow.new(
           site: self.class.site,
           fetcher: fetcher,
-          detector: Scraper::CompositeDetector.new(detectors)
+          detector: Scraper::CompositeDetector.new(detectors),
+          store: store
         ).run(path)
         render json: serialize(result)
       end
@@ -57,6 +68,12 @@ module Api
       # the flow.
       def detectors
         [Scraper::CloudflareDetector.new]
+      end
+
+      # Overridable wiring hook: the shared, process-wide ClearanceStore. Never
+      # build one here — it must outlive the request.
+      def store
+        self.class.clearance_store
       end
 
       def serialize(result)
