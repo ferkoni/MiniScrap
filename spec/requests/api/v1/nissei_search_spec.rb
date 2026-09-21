@@ -178,4 +178,70 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
       )
     end
   end
+
+  # The live-SSE variant: same endpoint, same flow, narrated as it happens.
+  describe "streaming (Server-Sent Events)" do
+    # [[event, data], ...] parsed from the text/event-stream body.
+    def sse_events
+      response.body.split("\n\n").map do |frame|
+        fields = frame.lines(chomp: true).to_h { |line| line.split(": ", 2) }
+        [fields["event"], JSON.parse(fields["data"])]
+      end
+    end
+
+    let(:responses) { [challenged, cleared] }
+
+    it "streams a cold start as fast_path -> solving -> fast_path -> done when asked via Accept" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }, headers: { "Accept" => "text/event-stream" }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.media_type).to eq("text/event-stream")
+      expect(response.headers["Cache-Control"]).to include("no-cache")
+      expect(sse_events.map(&:first)).to eq(%w[fast_path solving fast_path done])
+    end
+
+    it "also streams when asked via ?stream=true" do
+      get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
+
+      expect(response.media_type).to eq("text/event-stream")
+      expect(sse_events.map(&:first)).to eq(%w[fast_path solving fast_path done])
+    end
+
+    it "carries the same body as the plain JSON endpoint in the done event" do
+      get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
+      done = sse_events.last.last
+
+      expect(done.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
+      expect(done).to include("site" => "nissei", "browser_used" => true)
+      expect(done["results"].first).to include("title" => "PlayStation 5 Console", "position" => 1)
+    end
+
+    it "streams a warm request as fast_path -> done, without a solving step" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+      get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
+
+      expect(sse_events.map(&:first)).to eq(%w[fast_path done])
+      expect(sse_events.last.last["browser_used"]).to be(false)
+    end
+
+    # Headers are already sent once streaming starts, so the failure travels
+    # as a terminal error event carrying the status the JSON endpoint would use.
+    context "when the flow fails mid-stream" do
+      let(:responses) { [challenged] }
+
+      it "ends with an error event instead of done" do
+        get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
+
+        expect(sse_events.map(&:first)).to eq(%w[fast_path solving fast_path error])
+        expect(sse_events.last.last).to eq("error" => "retry_budget_exhausted", "status" => 502)
+      end
+    end
+
+    it "leaves the plain JSON endpoint unchanged" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response.media_type).to eq("application/json")
+      expect(response.parsed_body["browser_used"]).to be(true)
+    end
+  end
 end
