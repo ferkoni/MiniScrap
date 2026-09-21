@@ -224,4 +224,41 @@ RSpec.describe Scraper::ScrapeFlow do
       expect(gated.calls).to eq(1)
     end
   end
+
+  # The live-SSE seam: the flow narrates its escalation through an injected
+  # EventSink and still returns its ScrapeResult.
+  describe "progress events" do
+    let(:events) { Scraper::RecordingEventSink.new }
+
+    def run_with_events(fetcher)
+      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, events: events).run("search?q=ps5")
+    end
+
+    it "narrates a cold start as fast_path -> solving -> fast_path" do
+      result = run_with_events(Scraper::FakeFetcher.new(responses: [challenged, cleared]))
+
+      expect(events.names).to eq(%i[fast_path solving fast_path])
+      expect(events.events).to eq(
+        [
+          [:fast_path, { attempt: 1, clearance: false }],
+          [:solving, { kind: :cloudflare_js }],
+          [:fast_path, { attempt: 2, clearance: true }]
+        ]
+      )
+      expect(result).to be_a(Scraper::ScrapeResult).and have_attributes(browser_used: true)
+    end
+
+    it "narrates a warm request as a single fast_path, with no solving step" do
+      run_with_events(Scraper::FakeFetcher.new(responses: [challenged, cleared]))
+      events.events.clear
+
+      run_with_events(Scraper::FakeFetcher.new(response: cleared))
+
+      expect(events.events).to eq([[:fast_path, { attempt: 1, clearance: true }]])
+    end
+
+    it "emits nothing by default (the plain JSON path has no sink)" do
+      expect { result }.not_to raise_error
+    end
+  end
 end

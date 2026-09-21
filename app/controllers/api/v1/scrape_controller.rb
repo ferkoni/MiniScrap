@@ -6,6 +6,10 @@ module Api
     # controller-built path, run it, render the returned ScrapeResult as JSON.
     # Per-site children declare their Site and add one action per endpoint.
     class ScrapeController < ApplicationController
+      # Lets a request opt into Server-Sent Events (see #stream_scrape). A plain
+      # JSON request renders exactly as before.
+      include ActionController::Live
+
       class_attribute :site, instance_accessor: false
 
       # Where the FlareSolverr service (the slow path's browser) listens.
@@ -56,16 +60,44 @@ module Api
       private
 
       # Reusable edge helper: run the flow for a controller-built, site-relative
-      # path and render the result. Raised Scraper::Errors are mapped to status
-      # codes by the rescue_from above.
+      # path and render the result — one JSON body by default, or a live event
+      # stream when the client asks for one. Raised Scraper::Errors are mapped
+      # to status codes by the rescue_from above.
       def scrape(path)
-        result = Scraper::ScrapeFlow.new(
+        return stream_scrape(path) if stream?
+
+        render json: serialize(run_flow(path))
+      end
+
+      def run_flow(path, events: Scraper::NullEventSink.new)
+        Scraper::ScrapeFlow.new(
           site: self.class.site,
           fetcher: fetcher,
           detector: Scraper::CompositeDetector.new(detectors),
-          store: store
+          store: store,
+          events: events
         ).run(path)
-        render json: serialize(result)
+      end
+
+      def stream?
+        params[:stream] == "true" || request.headers["Accept"].to_s.include?("text/event-stream")
+      end
+
+      # The live-SSE variant: the flow narrates fast_path / solving as it
+      # happens, then the returned result goes out as a final `done` event
+      # carrying the same body as the JSON endpoint. Headers (and a 200) are
+      # already sent by then, so a failure becomes a terminal `error` event
+      # carrying the status the JSON endpoint would have used.
+      def stream_scrape(path)
+        response.headers["Content-Type"] = "text/event-stream"
+        response.headers["Cache-Control"] = "no-cache"
+        sink = Scraper::SseEventSink.new(response.stream)
+        sink.emit(:done, serialize(run_flow(path, events: sink)))
+      rescue Scraper::Error => error
+        status = Rack::Utils.status_code(ERROR_STATUS.fetch(error.class, :internal_server_error))
+        sink.emit(:error, error_body(error).merge(status: status))
+      ensure
+        response.stream.close
       end
 
       # Overridable wiring hook: the real curl-impersonate fast path,

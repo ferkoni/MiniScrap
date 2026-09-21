@@ -8,16 +8,18 @@ module Scraper
   # first, presenting a cached clearance when the store holds one; a challenge
   # means that clearance (if any) is dead, so it is dropped and a fresh one is
   # resolved, up to `max_retries` times. A cleared page that parses to zero
-  # products comes back flagged degraded: "zero_results".
+  # products comes back flagged degraded: "zero_results". Progress is narrated
+  # to an injected EventSink (fast_path, solving); the result is still returned.
   class ScrapeFlow
     ZERO_RESULTS = "zero_results".freeze
 
-    def initialize(site:, fetcher:, detector:, store:, max_retries: 1)
+    def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new)
       @site = site
       @fetcher = fetcher
       @detector = detector
       @store = store
       @max_retries = max_retries
+      @events = events
     end
 
     def run(path)
@@ -28,7 +30,7 @@ module Scraper
       browser_used = false
       retries = 0
 
-      response = fetch(url, clearance)
+      response = fetch(url, clearance, attempt: 1)
       while (challenge = @detector.detect(response))
         # Whatever we presented did not clear — expired early or never worked —
         # so drop it before this request or the next one reuses it.
@@ -36,9 +38,10 @@ module Scraper
         raise RetryBudgetExhausted if retries >= @max_retries
 
         retries += 1
+        @events.emit(:solving, kind: challenge.kind)
         clearance = @store.clearance(key, url, challenge)
         browser_used = true
-        response = fetch(url, clearance)
+        response = fetch(url, clearance, attempt: retries + 1)
       end
 
       results = @site.parser.parse(response.body)
@@ -58,7 +61,8 @@ module Scraper
 
     # Replays the clearance's cookies, headers, and UA together — they are bound
     # to each other — or fetches bare when there is none.
-    def fetch(url, clearance)
+    def fetch(url, clearance, attempt:)
+      @events.emit(:fast_path, attempt: attempt, clearance: !clearance.nil?)
       @fetcher.fetch(
         url,
         ua: clearance&.ua,
