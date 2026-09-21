@@ -18,12 +18,13 @@ module Api
       )
 
       # Flow error -> HTTP status. This is the edge's single source of truth for
-      # mapping raised Scraper::Errors onto responses; later slices add their
-      # entries here (SolveFailed -> 502, SolveTimeout -> 504) without touching
-      # the Rails-free core.
+      # mapping raised Scraper::Errors onto responses; a new error is a new
+      # entry here, never a change to the Rails-free core.
       ERROR_STATUS = {
         Scraper::UnsupportedChallenge => :not_implemented,
-        Scraper::RetryBudgetExhausted => :bad_gateway
+        Scraper::RetryBudgetExhausted => :bad_gateway,
+        Scraper::SolveFailed => :bad_gateway,
+        Scraper::SolveTimeout => :gateway_timeout
       }.freeze
 
       rescue_from Scraper::Error do |error|

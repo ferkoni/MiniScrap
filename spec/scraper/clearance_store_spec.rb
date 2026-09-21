@@ -1,8 +1,9 @@
 require "rails_helper"
+require_relative "../support/gated_solver"
 
 # The reactive store: solve on a miss, serve a valid clearance until it
-# expires, and drop one the fast path reports dead. Single-threaded here; the
-# per-key single-flight lock arrives in slice #4.
+# expires, and drop one the fast path reports dead — with a per-key
+# single-flight solve so a concurrent herd costs one browser, not N.
 RSpec.describe Scraper::ClearanceStore do
   let(:now) { Time.utc(2026, 1, 1, 12, 0, 0) }
   let(:clock) { -> { now } }
@@ -87,8 +88,7 @@ RSpec.describe Scraper::ClearanceStore do
     end
 
     # Compare-and-delete: a caller holding an older, dead clearance must not
-    # evict a fresher one another request already solved (matters once slice
-    # #4 makes requests concurrent).
+    # evict a fresher one another concurrent request already solved.
     it "leaves a newer clearance in place" do
       stale = Scraper::Clearance.new(cookies: { "cf_clearance" => "old" }, headers: {}, ua: "UA", expires_at: now + 60)
       fresh = store.clearance(key, url, challenge)
@@ -96,6 +96,82 @@ RSpec.describe Scraper::ClearanceStore do
       store.invalidate(key, stale)
 
       expect(store.peek(key)).to eq(fresh)
+    end
+  end
+
+  # Single-flight: callers are real threads; GatedSolver holds the solve open
+  # until the whole herd has piled up behind it, so the counts are
+  # deterministic rather than timing-dependent.
+  describe "single-flight" do
+    let(:herd) { 5 }
+    let(:clearance) { Scraper::Clearance.new(cookies: { "cf_clearance" => "solved" }, headers: {}, ua: "UA", expires_at: now + 1800) }
+    let(:gated) { GatedSolver.new(-> { clearance }) }
+    let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), clock: clock) }
+
+    # Starts `count` concurrent #clearance calls; each thread's value is the
+    # Clearance it got or the error it raised.
+    def stampede(count, key: self.key)
+      Array.new(count) do
+        Thread.new do
+          store.clearance(key, url, challenge)
+        rescue Scraper::Error => error
+          error
+        end
+      end
+    end
+
+    it "collapses N concurrent same-key callers onto exactly one solve" do
+      threads = stampede(herd)
+      expect(gated.wait_until_entered).to be(true)
+      GatedSolver.wait_until_blocked(threads)
+      gated.release
+
+      expect(threads.map(&:value)).to all(eq(clearance))
+      expect(gated.calls).to eq(1)
+      expect(store.peek(key)).to eq(clearance)
+    end
+
+    it "solves different keys in parallel instead of serialising them" do
+      threads = stampede(1) + stampede(1, key: Scraper::ClearanceKey.new(site_id: "other"))
+
+      # Both solves must be in flight at once; a global lock would park the
+      # second caller before it ever reached the solver.
+      expect(gated.wait_until_entered).to be(true)
+      expect(gated.wait_until_entered).to be(true)
+      gated.release(2)
+
+      expect(threads.map(&:value)).to all(eq(clearance))
+      expect(gated.calls).to eq(2)
+    end
+
+    context "when the leader's solve fails" do
+      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveFailed }, -> { clearance }) }
+
+      def failed_burst
+        threads = stampede(herd)
+        gated.wait_until_entered
+        GatedSolver.wait_until_blocked(threads)
+        gated.release
+        threads.map(&:value)
+      end
+
+      it "fails every waiter with the leader's error instead of promoting a new leader" do
+        expect(failed_burst).to all(be_a(Scraper::SolveFailed))
+        expect(gated.calls).to eq(1)
+      end
+
+      it "caches nothing" do
+        failed_burst
+        expect(store.peek(key)).to be_nil
+      end
+
+      it "lets the next request after the burst attempt a fresh solve" do
+        failed_burst
+        gated.release
+
+        expect(store.clearance(key, url, challenge)).to eq(clearance)
+        expect(gated.calls).to eq(2)
+      end
     end
   end
 end
