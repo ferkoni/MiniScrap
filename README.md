@@ -191,33 +191,103 @@ revisit that and anonymize both the prose and the site-specific code.
 
 ---
 
-## Running it
+## Running it in development
 
-**Requirements:** Ruby 3.4, [curl-impersonate](https://github.com/lexiforest/curl-impersonate)
-(lexiforest build) and Docker for [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr).
-There's no database, Redis or job queue.
+**You need:** Ruby 3.4.9, Docker, and curl-impersonate. There's no database, Redis or job queue.
+
+### 1. Ruby and gems
+
+`.ruby-version` pins Ruby 3.4.9, and `.ruby-gemset` names an RVM gemset (`miniscrap`), which RVM
+picks up automatically on `cd`. rbenv, asdf and mise read `.ruby-version` too.
 
 ```bash
-bundle install
-docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:latest
-bin/rails server
-
-curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
-curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events
+bin/setup --skip-server     # bundle install + clear logs/tmp
 ```
+
+### 2. curl-impersonate (the fast path)
+
+The fast path shells out to the `curl-impersonate` binary from the
+[lexiforest build](https://github.com/lexiforest/curl-impersonate). MiniScrap was built and tested
+against **v1.5.6**; its newest Chrome profile is `chrome146`, which the nissei site declares. Download
+the tarball for your platform (`x86_64-linux-gnu`, `aarch64-linux-gnu`, `x86_64-macos`,
+`arm64-macos`, …) and unpack it; the files sit at the top level of the archive:
+
+```bash
+mkdir -p ~/curl-impersonate && cd ~/curl-impersonate
+curl -LO https://github.com/lexiforest/curl-impersonate/releases/download/v1.5.6/curl-impersonate-v1.5.6.x86_64-linux-gnu.tar.gz
+tar xzf curl-impersonate-v1.5.6.x86_64-linux-gnu.tar.gz
+./curl-impersonate --version    # curl 8.15.0-IMPERSONATE …
+```
+
+Anywhere other than `~/curl-impersonate` works too; point `CURL_IMPERSONATE_DIR` at it.
+
+### 3. FlareSolverr (the slow path)
+
+FlareSolverr is a long-running service that the app calls; the app never spawns it. Run it in
+Docker. `v3.5.2` is the tested version (its Chromium is Chrome 152, the closest match for the
+`chrome146` TLS profile):
+
+```bash
+docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr:v3.5.2
+curl -s localhost:8191/     # {"msg": "FlareSolverr is ready!", "version": "3.5.2", …}
+```
+
+It only does work on a cold start or when a clearance dies. Stop it with
+`docker rm -f flaresolverr`.
+
+### 4. Start the app
+
+```bash
+bin/dev                     # = bin/rails server, on http://localhost:3000 (PORT to change)
+```
+
+```bash
+curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
+curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events (-N: don't buffer)
+curl 'localhost:3000/up'                                         # health check
+```
+
+The first search after boot is a cold start (`browser_used: true`, ~15s). Later ones reuse the
+cached clearance (`browser_used: false`, a few seconds) until it expires or dies. The clearance
+lives in the server process's memory, so **restarting the server means the next request is cold
+again.**
 
 | Env var | Default | What |
 |---|---|---|
-| `CURL_IMPERSONATE_DIR` | `~/curl-impersonate` | where the `curl-impersonate` binary lives |
+| `CURL_IMPERSONATE_DIR` | `~/curl-impersonate` | directory holding the `curl-impersonate` binary |
 | `FLARESOLVERR_URL` | `http://localhost:8191` | the FlareSolverr service |
+| `PORT` | `3000` | the Puma port |
 
-**Tests** run fully offline (the fast path is injected, and FlareSolverr is stubbed with WebMock):
+Background refresh-ahead solves (XFetch) don't appear in any response. Look for
+`[ClearanceStore] refresh-ahead …` lines in `log/development.log`.
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| `502 {"error":"fetch_failed"}` | curl-impersonate isn't at `CURL_IMPERSONATE_DIR`, or the site is unreachable |
+| `502 {"error":"solve_failed"}` mentioning *Connection refused* | FlareSolverr isn't running, or isn't at `FLARESOLVERR_URL` |
+| `504 {"error":"solve_timeout"}` | FlareSolverr couldn't clear the challenge within 60s |
+| `502 {"error":"retry_budget_exhausted"}` | a fresh clearance was still challenged, usually because FlareSolverr's Chrome version and the curl-impersonate profile drifted too far apart (see §3) |
+| `200` with `"degraded":"zero_results"` | the page loaded but nothing parsed; the site's layout may have changed |
+
+### Tests and checks
+
+Tests run fully offline: the fast path is injected, and FlareSolverr is stubbed with WebMock. You
+don't need Docker or curl-impersonate for them.
 
 ```bash
 bundle exec rspec                     # the suite CI runs
-LIVE=1 bundle exec rspec spec/live    # real curl-impersonate + one real solve against nissei
-bin/rubocop && bin/brakeman
+bin/rubocop                           # style
+bin/brakeman --no-pager               # security scan
+bin/bundler-audit                     # gem advisories
+```
+
+The `:live` specs hit the real network, so they're opt-in and never run in CI. They need steps 2 and 3:
+
+```bash
+LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real solve against nissei
 ```
 
 The live solver spec also refreshes `spec/fixtures/nissei_results.html`, the real captured page the
-parser is tested against.
+parser is tested against. Keep live runs rare (see *Ethics* above).
