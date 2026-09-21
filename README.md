@@ -153,14 +153,22 @@ template shared the product-card class.
 
 ## 7. What I deliberately scoped out, and how I'd build it at scale
 
-- **Multi-host deployment.** The Kamal setup (see *Deploying*) is deliberately **one host, one
-  process**: FlareSolverr must share the app's egress IP, and the clearance cache is per-process.
-  Going wider is the shared-store work below.
-- **One process, in-memory store.** Multiple app servers would need a shared store (Redis) and a
-  distributed single-flight lock, keyed by `(site, profile, egress IP)`, because a clearance is bound
-  to its IP. `ClearanceKey` already has the `profile:` and `proxy:` slots.
-- **One egress IP.** At scale, requests fan out over a proxy pool, and every proxy holds its own
-  clearance. The same key change covers it.
+- **Multi-host deployment.** The Kamal setup (see *Deploying*) is **one host**, because
+  FlareSolverr must share the app's egress IP. It runs one process by default, or several workers
+  with the shared store below. Going to several hosts also needs a shared egress (the proxy pool
+  below), and isn't wired up in the Kamal config.
+- **Shared store: built, opt-in.** Set `REDIS_URL` and the clearance cache and its single-flight
+  lock move to Redis. Puma may then run workers (`WEB_CONCURRENCY`), and a cold herd spread across
+  processes still costs **one** browser solve (measured: 6 concurrent requests over 2 workers,
+  1 FlareSolverr solve). The per-key lock is `SET NX PX` with a token. The leader publishes its
+  outcome (the clearance or its error) for waiters in any process, and a crashed leader's lock
+  expires, so its waiters fail cleanly rather than hang. XFetch and compare-and-delete invalidation
+  work the same across processes. Without `REDIS_URL`, the in-memory store is unchanged.
+- **Proxy pool: built, opt-in.** `SCRAPER_PROXIES` (comma-separated) rotates requests over egress
+  proxies. A clearance is keyed by `(site, profile, proxy)` and both solved and replayed through
+  its proxy, so it's never presented from a different IP. Credentials never appear in Redis keys.
+  Sharing Redis across *hosts* is only correct through such a pool or a common NAT, since a
+  clearance is bound to its egress IP.
 - **Browsers as a pool, not a container.** One FlareSolverr is enough at this volume. At scale:
   a pool of browser workers behind a queue, sized by solve rate rather than request rate.
 - **Interactive challenges.** Click-required Turnstile or reCAPTCHA can't be solved by FlareSolverr.
@@ -260,6 +268,8 @@ again.**
 | `CURL_IMPERSONATE_DIR` | `~/curl-impersonate` | directory holding the `curl-impersonate` binary |
 | `FLARESOLVERR_URL` | `http://localhost:8191` | the FlareSolverr service |
 | `PORT` | `3000` | the Puma port |
+| `REDIS_URL` | unset | share the clearance cache + single-flight lock across processes (allows `WEB_CONCURRENCY`) |
+| `SCRAPER_PROXIES` | unset | comma-separated egress proxies, round-robin; each gets its own clearance |
 
 `GET /ready` reports whether curl-impersonate and FlareSolverr are both usable (`200` or `503`,
 naming each check).
@@ -284,10 +294,18 @@ don't need Docker or curl-impersonate for them.
 
 ```bash
 bin/ci                                # everything below in one go, as GitHub Actions runs it
-bundle exec rspec                     # the suite CI runs
+bundle exec rspec                     # the suite CI runs (Redis specs need REDIS_URL, below)
 bin/rubocop                           # style
 bin/brakeman --no-pager               # security scan
 bin/bundler-audit                     # gem advisories
+```
+
+The `:redis` specs (the Redis backend, including its cross-process guarantees) run when `REDIS_URL`
+is set, as it is in CI. Locally, use a throwaway Redis, not one you care about:
+
+```bash
+docker run -d --name miniscrap-redis -p 127.0.0.1:6380:6379 redis:7-alpine
+REDIS_URL=redis://127.0.0.1:6380/15 bundle exec rspec
 ```
 
 The `:live` specs hit the real network, so they're opt-in and never run in CI. They need steps 2 and 3:
@@ -314,8 +332,9 @@ IP that solved it.
   published; the app reaches it over Kamal's Docker network.
 - **kamal-proxy** gets a 90s response timeout and unbuffered responses, for the same two reasons.
   It health-checks `/up`.
-- **One Puma process, 16 threads.** `config/puma.rb` refuses `WEB_CONCURRENCY > 1`, because the
-  clearance cache is per-process memory.
+- **One Puma process, 16 threads, by default.** `config/puma.rb` refuses `WEB_CONCURRENCY > 1`
+  unless `REDIS_URL` is set, because otherwise the clearance cache is per-process memory. The
+  commented `redis` accessory and env lines in `config/deploy.yml` switch on workers.
 
 **First deploy:**
 

@@ -55,6 +55,21 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     expect(Scraper::CurlImpersonateFetcher).to have_received(:new).with(hash_including(profile: :chrome146))
   end
 
+  it "sends the request through the next proxy from the configured pool" do
+    fake = Scraper::FakeFetcher.new(responses: responses)
+    allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(fake)
+    allow(Api::V1::ScrapeController).to receive(:proxy_pool).and_return(Scraper::ProxyPool.new(["http://p1:8080"]))
+    expect(fake).to receive(:fetch).with(anything, hash_including(proxy: "http://p1:8080")).and_call_original
+
+    get "/api/v1/nissei/search", params: { q: "ps5" }
+  end
+
+  it "shares clearances through Redis when REDIS_URL is set" do
+    store = Api::V1::ScrapeController.build_clearance_store(redis_url: "redis://redis.test:6379/0")
+    expect(store.backend).to be_a(Scraper::ClearanceStore::RedisBackend)
+    expect(Api::V1::ScrapeController.build_clearance_store(redis_url: nil).backend).to be_a(Scraper::ClearanceStore::MemoryBackend)
+  end
+
   # nissei runs Magento; /py/search is a 404 page, catalogsearch is the search.
   it "fetches nissei's catalog search with the query escaped" do
     fake = Scraper::FakeFetcher.new(responses: responses)

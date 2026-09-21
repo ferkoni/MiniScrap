@@ -16,10 +16,20 @@ module Api
       FLARESOLVERR_URL = ENV.fetch("FLARESOLVERR_URL", "http://localhost:8191")
 
       # The production store: Cloudflare challenges routed to FlareSolverr;
-      # background refresh-ahead solves report to the Rails log.
-      def self.build_clearance_store
+      # background refresh-ahead solves report to the Rails log. With
+      # REDIS_URL the cache and its single-flight lock are shared by every
+      # process (so Puma may run workers, and several hosts may share it);
+      # without, they live in this process's memory.
+      def self.build_clearance_store(redis_url: ENV["REDIS_URL"])
+        backend = if redis_url
+          Scraper::ClearanceStore::RedisBackend.new(redis: Redis.new(url: redis_url))
+        else
+          Scraper::ClearanceStore::MemoryBackend.new
+        end
+
         Scraper::ClearanceStore.new(
           registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL)),
+          backend: backend,
           logger: Rails.logger
         )
       end
@@ -28,6 +38,10 @@ module Api
       # controller and every request so a solved clearance outlives the request
       # that solved it (a store per request would re-solve every time).
       class_attribute :clearance_store, instance_accessor: false, default: build_clearance_store
+
+      # Egress proxies, round-robin per request (SCRAPER_PROXIES, comma-
+      # separated). Each gets its own clearance. Empty: the host's own IP.
+      class_attribute :proxy_pool, instance_accessor: false, default: Scraper::ProxyPool.parse(ENV["SCRAPER_PROXIES"])
 
       # Where the curl-impersonate binary lives (lexiforest build).
       CURL_IMPERSONATE_DIR = ENV.fetch("CURL_IMPERSONATE_DIR") { File.expand_path("~/curl-impersonate") }
@@ -75,7 +89,8 @@ module Api
           fetcher: fetcher,
           detector: Scraper::CompositeDetector.new(detectors),
           store: store,
-          events: events
+          events: events,
+          proxy: self.class.proxy_pool.next
         ).run(path)
       end
 

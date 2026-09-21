@@ -1,14 +1,18 @@
 require "rails_helper"
 require_relative "../support/gated_solver"
+require_relative "../support/redis_helper"
 
 # The reactive store: solve on a miss, serve a valid clearance until it
 # expires, and drop one the fast path reports dead — with a per-key
 # single-flight solve so a concurrent herd costs one browser, not N.
-RSpec.describe Scraper::ClearanceStore do
+#
+# One contract, two backends: every example below runs against the in-memory
+# backend and, with REDIS_URL set, against Redis (see the bottom of the file).
+RSpec.shared_examples "a clearance store" do
   let(:now) { Time.utc(2026, 1, 1, 12, 0, 0) }
   let(:clock) { -> { now } }
   let(:solver) { Scraper::StubSolver.new(clock: clock, ttl: 1800) }
-  let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: solver), clock: clock) }
+  let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: solver), backend: backend, clock: clock) }
 
   let(:key) { Scraper::ClearanceKey.new(site_id: "nissei") }
   let(:url) { "https://nissei.com/py/search?q=ps5" }
@@ -106,7 +110,28 @@ RSpec.describe Scraper::ClearanceStore do
     let(:herd) { 5 }
     let(:clearance) { Scraper::Clearance.new(cookies: { "cf_clearance" => "solved" }, headers: {}, ua: "UA", expires_at: now + 1800) }
     let(:gated) { GatedSolver.new(-> { clearance }) }
-    let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), clock: clock) }
+    let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock) }
+
+    # Counts callers that have joined an in-flight solve, so a spec releases
+    # the leader only once the herd is genuinely waiting on it. (A parked
+    # thread is not enough: with Redis it may still be queued on the
+    # connection, about to *lead* a fresh flight once this one finishes.)
+    let(:joined) { Concurrent::AtomicFixnum.new }
+
+    before do
+      allow(backend).to receive(:join).and_wrap_original do |original, *args|
+        original.call(*args).tap { |flight| joined.increment if flight }
+      end
+    end
+
+    def await_joined(count)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + GatedSolver::WAIT
+      until joined.value >= count
+        raise "only #{joined.value} of #{count} callers joined the flight" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+        Thread.pass
+      end
+    end
 
     # Starts `count` concurrent #clearance calls; each thread's value is the
     # Clearance it got or the error it raised.
@@ -123,7 +148,7 @@ RSpec.describe Scraper::ClearanceStore do
     it "collapses N concurrent same-key callers onto exactly one solve" do
       threads = stampede(herd)
       expect(gated.wait_until_entered).to be(true)
-      GatedSolver.wait_until_blocked(threads)
+      await_joined(herd - 1)
       gated.release
 
       expect(threads.map(&:value)).to all(eq(clearance))
@@ -150,7 +175,7 @@ RSpec.describe Scraper::ClearanceStore do
       def failed_burst
         threads = stampede(herd)
         gated.wait_until_entered
-        GatedSolver.wait_until_blocked(threads)
+        await_joined(herd - 1)
         gated.release
         threads.map(&:value)
       end
@@ -191,6 +216,7 @@ RSpec.describe Scraper::ClearanceStore do
     let(:store) do
       described_class.new(
         registry: Scraper::SolverRegistry.new(cloudflare_js: timed_solver),
+        backend: backend,
         clock: clock,
         rand: -> { Math.exp(-1) }, # -ln(rand) == 1, so the expected lead is exactly delta * beta
         beta: 1.0,
@@ -208,7 +234,7 @@ RSpec.describe Scraper::ClearanceStore do
         include Scraper::Solver
         attr_reader :calls
 
-        define_method(:solve) do |_url, _challenge|
+        define_method(:solve) do |_url, _challenge, proxy: nil|
           @calls = @calls.to_i + 1
           times << times.last + cost
           Scraper::Clearance.new(cookies: { "cf_clearance" => "v#{@calls}" }, headers: {}, ua: "UA", expires_at: times.last + 1800)
@@ -304,5 +330,21 @@ RSpec.describe Scraper::ClearanceStore do
         expect(gated.calls).to eq(1)
       end
     end
+  end
+end
+
+RSpec.describe Scraper::ClearanceStore do
+  context "with the in-memory backend" do
+    let(:backend) { described_class::MemoryBackend.new }
+
+    it_behaves_like "a clearance store"
+  end
+
+  # Same examples, entries and flights in Redis. A fresh namespace per example
+  # keeps them isolated without flushing a shared database.
+  context "with the Redis backend", :redis do
+    let(:backend) { redis_backend }
+
+    it_behaves_like "a clearance store"
   end
 end

@@ -29,8 +29,8 @@ module Scraper
       @runner = runner
     end
 
-    def fetch(url, ua: nil, cookies: {}, headers: {})
-      result = @runner.call(command(url, ua:, cookies:, headers:), timeout: @timeout + KILL_GRACE)
+    def fetch(url, ua: nil, cookies: {}, headers: {}, proxy: nil)
+      result = @runner.call(command(url, ua:, cookies:, headers:, proxy:), timeout: @timeout + KILL_GRACE)
       raise FetchFailed, result.stderr.strip unless result.success?
 
       parse(result.stdout)
@@ -49,7 +49,7 @@ module Scraper
 
     private
 
-    def command(url, ua:, cookies:, headers:)
+    def command(url, ua:, cookies:, headers:, proxy:)
       [
         @binary,
         "--impersonate", @profile.to_s,
@@ -59,6 +59,7 @@ module Scraper
         "--write-out", "#{META}%{response_code}#{META}%{header_json}",
         *header_args(ua, headers),
         *cookie_args(cookies),
+        *(["--proxy", proxy] if proxy),
         url
       ]
     end

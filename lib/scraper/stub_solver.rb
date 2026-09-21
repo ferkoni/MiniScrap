@@ -17,7 +17,7 @@ module Scraper
       @calls = 0
     end
 
-    def solve(_url, _challenge)
+    def solve(_url, _challenge, proxy: nil)
       @calls += 1
       Clearance.new(cookies: COOKIES, headers: {}, ua: UA, expires_at: @clock.call + @ttl)
     end

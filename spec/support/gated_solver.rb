@@ -18,7 +18,7 @@ class GatedSolver
     @calls.value
   end
 
-  def solve(_url, _challenge)
+  def solve(_url, _challenge, proxy: nil)
     @calls.increment
     @entered << true
     raise "GatedSolver was never released" if @gate.pop(timeout: WAIT).nil?

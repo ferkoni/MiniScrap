@@ -34,8 +34,8 @@ module Scraper
       @clock = clock
     end
 
-    def solve(url, _challenge)
-      solution = request_solve(url)
+    def solve(url, _challenge, proxy: nil)
+      solution = request_solve(url, proxy)
       clearance_cookie = solution.fetch("cookies", []).find { |cookie| cookie["name"] == CLEARANCE_COOKIE }
       raise SolveFailed, "FlareSolverr returned no #{CLEARANCE_COOKIE} cookie" unless clearance_cookie
 
@@ -59,8 +59,10 @@ module Scraper
 
     private
 
-    def request_solve(url)
-      body = JSON.parse(post(cmd: "request.get", url: url, maxTimeout: @timeout * 1000).body)
+    def request_solve(url, proxy)
+      payload = { cmd: "request.get", url: url, maxTimeout: @timeout * 1000 }
+      payload[:proxy] = proxy_option(proxy) if proxy
+      body = JSON.parse(post(payload).body)
       return body["solution"] if body["status"] == "ok" && body["solution"]
 
       message = "FlareSolverr: #{body["message"]}"
@@ -77,6 +79,15 @@ module Scraper
       Net::HTTP.start(@endpoint.host, @endpoint.port, open_timeout: 5, read_timeout: @timeout + READ_GRACE) do |http|
         http.post(@endpoint.path, payload.to_json, "Content-Type" => "application/json")
       end
+    end
+
+    # FlareSolverr takes the proxy URL and its credentials as separate fields.
+    def proxy_option(proxy)
+      uri = URI(proxy)
+      option = { url: "#{uri.scheme}://#{uri.host}:#{uri.port}" }
+      option[:username] = URI.decode_www_form_component(uri.user) if uri.user
+      option[:password] = URI.decode_www_form_component(uri.password) if uri.password
+      option
     end
 
     def expires_at(cookie)
