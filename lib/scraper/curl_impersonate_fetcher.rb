@@ -36,6 +36,9 @@ module Scraper
       parse(result.stdout)
     rescue Subprocess::TimedOut => error
       raise FetchFailed, error.message
+    rescue SystemCallError => error
+      # The binary is missing or not executable — a setup problem, not a crash.
+      raise FetchFailed, "cannot run #{@binary} (set CURL_IMPERSONATE_DIR): #{error.message}"
     end
 
     private

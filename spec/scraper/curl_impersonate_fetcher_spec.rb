@@ -122,6 +122,14 @@ RSpec.describe Scraper::CurlImpersonateFetcher do
     end
   end
 
+  context "when the curl-impersonate binary is missing" do
+    let(:runner) { ->(_argv, timeout:) { raise Errno::ENOENT, "/opt/curl-impersonate/curl-impersonate" } }
+
+    it "raises FetchFailed pointing at CURL_IMPERSONATE_DIR, not a bare 500" do
+      expect { fetcher.fetch(url) }.to raise_error(Scraper::FetchFailed, /CURL_IMPERSONATE_DIR/)
+    end
+  end
+
   context "when the process has to be killed" do
     let(:runner) { ->(_argv, timeout:) { raise Scraper::Subprocess::TimedOut, "killed after #{timeout}s" } }
 
