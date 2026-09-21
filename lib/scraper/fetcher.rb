@@ -4,8 +4,8 @@ module Scraper
   #
   #   fetch(url, ua:, cookies:, headers:) -> Response
   #
-  # Impls: CurlImpersonateFetcher (production, arrives in a later slice) and
-  # FakeFetcher (the spec/dev injection seam).
+  # Impls: CurlImpersonateFetcher (production) and FakeFetcher (the spec
+  # injection seam). Raises FetchFailed only when there is no response at all.
   module Fetcher
     def fetch(_url, ua: nil, cookies: {}, headers: {})
       raise NotImplementedError, "#{self.class} must implement #fetch"

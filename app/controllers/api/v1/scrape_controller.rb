@@ -17,12 +17,16 @@ module Api
         registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::StubSolver.new)
       )
 
+      # Where the curl-impersonate binary lives (lexiforest build).
+      CURL_IMPERSONATE_DIR = ENV.fetch("CURL_IMPERSONATE_DIR") { File.expand_path("~/curl-impersonate") }
+
       # Flow error -> HTTP status. This is the edge's single source of truth for
       # mapping raised Scraper::Errors onto responses; a new error is a new
       # entry here, never a change to the Rails-free core.
       ERROR_STATUS = {
         Scraper::UnsupportedChallenge => :not_implemented,
         Scraper::RetryBudgetExhausted => :bad_gateway,
+        Scraper::FetchFailed => :bad_gateway,
         Scraper::SolveFailed => :bad_gateway,
         Scraper::SolveTimeout => :gateway_timeout
       }.freeze
@@ -56,11 +60,11 @@ module Api
         render json: serialize(result)
       end
 
-      # Overridable wiring hook. The slice-1 walking skeleton defaults to a
-      # demoable FakeFetcher; slice #5 swaps this for the real
-      # Scraper::CurlImpersonateFetcher in production wiring.
+      # Overridable wiring hook: the real curl-impersonate fast path,
+      # impersonating the site's profile. Specs stub this construction point
+      # with a FakeFetcher.
       def fetcher
-        Scraper::FakeFetcher.new
+        Scraper::CurlImpersonateFetcher.new(profile: self.class.site.profile, bin_dir: CURL_IMPERSONATE_DIR)
       end
 
       # Overridable wiring hook: the ordered detector list, wrapped into a
