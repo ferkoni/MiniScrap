@@ -8,14 +8,20 @@ module Api
     class ScrapeController < ApplicationController
       class_attribute :site, instance_accessor: false
 
+      # Where the FlareSolverr service (the slow path's browser) listens.
+      FLARESOLVERR_URL = ENV.fetch("FLARESOLVERR_URL", "http://localhost:8191")
+
+      # The production store: Cloudflare challenges routed to FlareSolverr.
+      def self.build_clearance_store
+        Scraper::ClearanceStore.new(
+          registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL))
+        )
+      end
+
       # The one ClearanceStore for the whole process, shared by every site
       # controller and every request so a solved clearance outlives the request
-      # that solved it (a store per request would re-solve every time). Its
-      # registry routes :cloudflare_js to the StubSolver until slice #6 wires
-      # FlareSolverrSolver.
-      class_attribute :clearance_store, instance_accessor: false, default: Scraper::ClearanceStore.new(
-        registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::StubSolver.new)
-      )
+      # that solved it (a store per request would re-solve every time).
+      class_attribute :clearance_store, instance_accessor: false, default: build_clearance_store
 
       # Where the curl-impersonate binary lives (lexiforest build).
       CURL_IMPERSONATE_DIR = ENV.fetch("CURL_IMPERSONATE_DIR") { File.expand_path("~/curl-impersonate") }

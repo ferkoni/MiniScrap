@@ -14,6 +14,8 @@ module Scraper
   # the burst starts a fresh attempt. Only the short bookkeeping runs under the
   # guard; the solve itself does not, so different keys solve in parallel.
   class ClearanceStore
+    attr_reader :registry
+
     def initialize(registry:, clock: -> { Time.now })
       @registry = registry
       @clock = clock

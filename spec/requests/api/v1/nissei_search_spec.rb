@@ -52,7 +52,24 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
   it "wires the real curl-impersonate fetcher with the site's profile" do
     get "/api/v1/nissei/search", params: { q: "ps5" }
 
-    expect(Scraper::CurlImpersonateFetcher).to have_received(:new).with(hash_including(profile: :chrome131))
+    expect(Scraper::CurlImpersonateFetcher).to have_received(:new).with(hash_including(profile: :chrome146))
+  end
+
+  # nissei runs Magento; /py/search is a 404 page, catalogsearch is the search.
+  it "fetches nissei's catalog search with the query escaped" do
+    fake = Scraper::FakeFetcher.new(responses: responses)
+    allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(fake)
+    expect(fake).to receive(:fetch)
+      .with("https://nissei.com/py/catalogsearch/result/?q=ps5+pro", anything)
+      .and_call_original
+
+    get "/api/v1/nissei/search", params: { q: "ps5 pro" }
+  end
+
+  it "routes Cloudflare challenges to FlareSolverr in production wiring" do
+    challenge = Scraper::Challenge.new(kind: :cloudflare_js, evidence: {})
+
+    expect(Api::V1::ScrapeController.build_clearance_store.registry.for(challenge)).to be_a(Scraper::FlareSolverrSolver)
   end
 
   context "when the fast path cannot be fetched at all" do
