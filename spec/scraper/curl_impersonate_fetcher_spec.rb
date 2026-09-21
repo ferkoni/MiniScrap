@@ -137,4 +137,21 @@ RSpec.describe Scraper::CurlImpersonateFetcher do
       expect { fetcher.fetch(url) }.to raise_error(Scraper::FetchFailed, /killed/)
     end
   end
+
+  # Readiness, for GET /ready: is the binary there and runnable? No request.
+  describe "#ready?" do
+    it "is true when the curl-impersonate binary is executable" do
+      Dir.mktmpdir do |dir|
+        binary = File.join(dir, "curl-impersonate")
+        File.write(binary, "#!/bin/sh\n")
+        File.chmod(0o755, binary)
+
+        expect(described_class.new(profile: :chrome146, bin_dir: dir).ready?).to be(true)
+      end
+    end
+
+    it "is false when the binary is missing" do
+      expect(described_class.new(profile: :chrome146, bin_dir: "/nonexistent").ready?).to be(false)
+    end
+  end
 end

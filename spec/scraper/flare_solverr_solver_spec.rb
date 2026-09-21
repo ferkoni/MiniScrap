@@ -113,4 +113,30 @@ RSpec.describe Scraper::FlareSolverrSolver do
       expect { solver.solve(url, challenge) }.to raise_error(Scraper::SolveFailed)
     end
   end
+
+  # Readiness, for GET /ready: is the browser service up at all? A cheap GET,
+  # never a solve.
+  describe "#ready?" do
+    let(:root) { "http://flaresolverr.test:8191/" }
+
+    it "is true when FlareSolverr reports itself ready" do
+      stub_request(:get, root).to_return(status: 200, body: { msg: "FlareSolverr is ready!", version: "3.5.2" }.to_json)
+      expect(solver.ready?).to be(true)
+    end
+
+    it "is false when the service is unreachable" do
+      stub_request(:get, root).to_raise(Errno::ECONNREFUSED)
+      expect(solver.ready?).to be(false)
+    end
+
+    it "is false on an error status" do
+      stub_request(:get, root).to_return(status: 503, body: "")
+      expect(solver.ready?).to be(false)
+    end
+
+    it "is false when the service does not answer promptly" do
+      stub_request(:get, root).to_timeout
+      expect(solver.ready?).to be(false)
+    end
+  end
 end

@@ -41,6 +41,12 @@ module Scraper
       raise FetchFailed, "cannot run #{@binary} (set CURL_IMPERSONATE_DIR): #{error.message}"
     end
 
+    # Is the binary there and runnable? No request is made — for readiness
+    # checks.
+    def ready?
+      File.executable?(@binary)
+    end
+
     private
 
     def command(url, ua:, cookies:, headers:)

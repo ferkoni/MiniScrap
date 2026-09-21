@@ -27,6 +27,7 @@ module Scraper
     # clearance for — the cookie's own expiry is far longer than Cloudflare
     # honours it; earlier death is caught reactively by a fresh 403.
     def initialize(base_url:, timeout: 60, ttl: 1800, clock: -> { Time.now })
+      @root = URI.join(base_url, "/")
       @endpoint = URI.join(base_url, "/v1")
       @timeout = timeout
       @ttl = ttl
@@ -44,6 +45,16 @@ module Scraper
         ua: solution.fetch("userAgent"),
         expires_at: expires_at(clearance_cookie)
       )
+    end
+
+    # Is the service up at all? A cheap GET of FlareSolverr's root, never a
+    # solve — for readiness checks.
+    def ready?
+      Net::HTTP.start(@root.host, @root.port, open_timeout: 2, read_timeout: 2) do |http|
+        http.get(@root.path).is_a?(Net::HTTPSuccess)
+      end
+    rescue StandardError
+      false
     end
 
     private
