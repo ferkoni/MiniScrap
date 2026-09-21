@@ -40,6 +40,24 @@ RSpec.describe Scraper::NisseiParser do
     end
   end
 
+  # A second, independently captured real page (an "asus" search), so the
+  # selectors are proven on more than the page they were written against.
+  describe "a second real results page" do
+    subject(:results) { parse("nissei_results_asus.html") }
+
+    it "extracts every product with clean fields" do
+      expect(results.length).to eq(20)
+      expect(results.first).to have_attributes(
+        title: "Placa Madre Asus Prime A620AM-K AM5 DDR5",
+        price: "Gs. 960.808",
+        availability: "in_stock",
+        url: "https://nissei.com/py/placa-madre-asus-prime-a620am-k-am5-ddr5",
+        position: 1
+      )
+      expect(results).to all(have_attributes(title: be_present, price: start_with("Gs. "), url: start_with("https://nissei.com/py/")))
+    end
+  end
+
   # Every primary selector's hook is renamed or removed; only fallbacks match.
   describe "a layout-shifted page" do
     subject(:results) { parse("nissei_results_shifted.html") }
