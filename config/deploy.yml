@@ -11,9 +11,9 @@
 service: miniscrap
 image: <%= registry_user %>/miniscrap
 
-# A single web host. The clearance cache is per-process memory, so this is one
-# host running one Puma process (config/puma.rb refuses WEB_CONCURRENCY > 1)
-# until the store is shared (ISSUES.md slice #12).
+# A single web host, one Puma process: the clearance cache is per-process
+# memory unless REDIS_URL is set (config/puma.rb refuses WEB_CONCURRENCY > 1
+# without it). To run workers, enable the redis accessory below.
 servers:
   web:
     - <%= server %>
@@ -50,7 +50,12 @@ env:
     # Threads, not workers (see servers:). A cold request holds a thread for a
     # whole solve (~15s); a herd shares one solve but each waits on a thread.
     RAILS_MAX_THREADS: 16
-    # Never set WEB_CONCURRENCY above 1 (see config/puma.rb).
+    # Scale-out: with the redis accessory below enabled, share the clearance
+    # cache and its single-flight lock across Puma workers:
+    # REDIS_URL: redis://miniscrap-redis:6379/0
+    # WEB_CONCURRENCY: 2
+    # Egress proxies, comma-separated; each gets its own clearance:
+    # SCRAPER_PROXIES: http://user:pass@proxy-1:8080,http://user:pass@proxy-2:8080
 
 accessories:
   # The slow path's browser. On the SAME host as the app: a Cloudflare
@@ -64,6 +69,16 @@ accessories:
     env:
       clear:
         LOG_LEVEL: info
+
+  # Scale-out: the shared clearance store (uncomment with REDIS_URL above).
+  # Unpublished, on the same host. Sharing it across HOSTS is only correct if
+  # they share an egress IP — via SCRAPER_PROXIES (the proxy is part of the
+  # clearance key) or a common NAT — since a clearance is bound to its IP.
+  # redis:
+  #   image: redis:7-alpine
+  #   host: <%= server %>
+  #   directories:
+  #     - data:/data
 
 # "bin/kamal <alias>"
 aliases:

@@ -37,6 +37,21 @@ RSpec.describe Scraper::FlareSolverrSolver do
         .with(body: { cmd: "request.get", url: url, maxTimeout: 60_000 }, headers: { "Content-Type" => "application/json" })
     end
 
+    # The browser must solve through the same egress as the fast path will
+    # replay from; credentials go in FlareSolverr's own fields.
+    it "solves through the given proxy, credentials split out" do
+      solver.solve(url, challenge, proxy: "http://user:pw@proxy.example:8080")
+
+      expect(WebMock).to have_requested(:post, endpoint).with(
+        body: hash_including("proxy" => { "url" => "http://proxy.example:8080", "username" => "user", "password" => "pw" })
+      )
+    end
+
+    it "sends no proxy when there is none" do
+      solver.solve(url, challenge)
+      expect(WebMock).to have_requested(:post, endpoint).with { |request| !JSON.parse(request.body).key?("proxy") }
+    end
+
     it "packs every returned cookie and the browser's exact UA into a Clearance" do
       clearance = solver.solve(url, challenge)
 

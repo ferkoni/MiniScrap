@@ -13,19 +13,21 @@ module Scraper
   class ScrapeFlow
     ZERO_RESULTS = "zero_results".freeze
 
-    def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new)
+    def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new, proxy: nil)
       @site = site
       @fetcher = fetcher
       @detector = detector
       @store = store
       @max_retries = max_retries
       @events = events
+      @proxy = proxy
     end
 
     def run(path)
       started = monotonic_ms
       url = @site.url_for(path)
-      key = ClearanceKey.new(site_id: @site.id)
+      # The clearance is bound to the TLS profile and egress IP that solved it.
+      key = ClearanceKey.new(site_id: @site.id, profile: @site.profile, proxy: @proxy)
       clearance = @store.peek(key, refresh_url: url) # may also refresh ahead, in the background
       browser_used = false
       retries = 0
@@ -67,7 +69,8 @@ module Scraper
         url,
         ua: clearance&.ua,
         cookies: clearance&.cookies || {},
-        headers: clearance&.headers || {}
+        headers: clearance&.headers || {},
+        **{ proxy: @proxy }.compact # no proxy: the plain call
       )
     end
 

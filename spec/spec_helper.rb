@@ -48,6 +48,9 @@ RSpec.configure do |config|
   # FlareSolverr). They never run in CI; opt in locally with LIVE=1.
   config.filter_run_excluding :live unless ENV["LIVE"]
 
+  # Specs tagged :redis need a Redis server (REDIS_URL); CI provides one.
+  config.filter_run_excluding :redis unless ENV["REDIS_URL"]
+
 # The settings below are suggested to provide a good initial experience
 # with RSpec, but feel free to customize to your heart's content.
 =begin

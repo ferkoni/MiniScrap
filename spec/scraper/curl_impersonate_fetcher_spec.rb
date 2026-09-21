@@ -75,11 +75,16 @@ RSpec.describe Scraper::CurlImpersonateFetcher do
     end
   end
 
-  it "sends no User-Agent or cookie flags when there is no clearance, leaving the profile's own" do
+  it "routes through the given proxy" do
+    fetcher.fetch(url, proxy: "http://user:pw@proxy.example:8080")
+    expect(flag("--proxy")).to eq("http://user:pw@proxy.example:8080")
+  end
+
+  it "sends no User-Agent, cookie, or proxy flags when there is none, leaving the profile's own" do
     fetcher.fetch(url)
 
     expect(argv.grep(/\AUser-Agent:/)).to be_empty
-    expect(argv).not_to include("--cookie")
+    expect(argv).not_to include("--cookie", "--proxy")
   end
 
   describe "the returned Response" do

@@ -15,7 +15,7 @@ RSpec.describe Scraper::ScrapeFlow do
   let(:clock) { -> { times.last } }
   let(:solver) { Scraper::StubSolver.new(clock: clock, ttl: 1800) }
   let(:store) { Scraper::ClearanceStore.new(registry: Scraper::SolverRegistry.new(cloudflare_js: solver), clock: clock) }
-  let(:key) { Scraper::ClearanceKey.new(site_id: "nissei") }
+  let(:key) { Scraper::ClearanceKey.new(site_id: "nissei", profile: :chrome131) }
 
   let(:site) do
     Scraper::Site.new(
@@ -259,6 +259,39 @@ RSpec.describe Scraper::ScrapeFlow do
 
     it "emits nothing by default (the plain JSON path has no sink)" do
       expect { result }.not_to raise_error
+    end
+  end
+
+  # A clearance is bound to the egress IP that solved it, so each proxy gets
+  # its own: keyed by (site, profile, proxy), solved through that proxy, and
+  # never presented through another.
+  describe "proxy-keyed clearances" do
+    let(:solver) { Scraper::StubSolver.new(clock: clock, ttl: 1800) }
+
+    def run_via(proxy, fetcher)
+      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, proxy: proxy).run("search?q=ps5")
+    end
+
+    it "fetches and solves through the request's proxy, caching under a proxy-specific key" do
+      fetcher = Scraper::FakeFetcher.new(responses: [challenged, cleared])
+      expect(fetcher).to receive(:fetch).with(url, hash_including(proxy: "http://a:1")).twice.and_call_original
+      expect(solver).to receive(:solve).with(url, anything, proxy: "http://a:1").and_call_original
+
+      run_via("http://a:1", fetcher)
+
+      expect(store.peek(key.with(proxy: "http://a:1"))).to be_a(Scraper::Clearance)
+      expect(store.peek(key)).to be_nil
+    end
+
+    it "never presents a clearance solved through proxy A on a request through proxy B" do
+      run_via("http://a:1", Scraper::FakeFetcher.new(responses: [challenged, cleared]))
+
+      via_b = Scraper::FakeFetcher.new(responses: [challenged, cleared])
+      expect(via_b).to receive(:fetch).with(url, hash_including(proxy: "http://b:2", cookies: {})).ordered.and_call_original
+      expect(via_b).to receive(:fetch).with(url, hash_including(proxy: "http://b:2")).ordered.and_call_original
+
+      expect(run_via("http://b:2", via_b).browser_used).to be(true)
+      expect(solver.calls).to eq(2)
     end
   end
 end

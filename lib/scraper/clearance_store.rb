@@ -32,28 +32,28 @@ module Scraper
     # the re-solve).
     Entry = Data.define(:clearance, :delta, :challenge)
 
-    attr_reader :registry
+    attr_reader :registry, :backend
 
-    # beta scales how early refreshes start (0 disables refresh-ahead). rand
-    # must return a value in (0, 1]. executor runs background refreshes
-    # (Concurrent::Promises executor; :immediate makes them synchronous).
-    def initialize(registry:, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil))
+    # backend: where entries and in-flight solves live — MemoryBackend (one
+    # process) or RedisBackend (shared by every process). beta scales how early
+    # refreshes start (0 disables refresh-ahead). rand must return a value in
+    # (0, 1]. executor runs background refreshes (Concurrent::Promises
+    # executor; :immediate makes them synchronous).
+    def initialize(registry:, backend: MemoryBackend.new, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil))
       @registry = registry
+      @backend = backend
       @clock = clock
       @beta = beta
       @rand = rand
       @executor = executor
       @logger = logger
-      @entries = Concurrent::Map.new
-      @flights = {}
-      @guard = Mutex.new
     end
 
     # The cached clearance if it is still valid; never solves, never blocks.
     # With `refresh_url`, a valid clearance close enough to expiry also starts
     # a background refresh (XFetch) — the caller still gets the current one.
     def peek(key, refresh_url: nil)
-      entry = @entries[key]
+      entry = @backend.read(key)
       now = @clock.call
       return unless entry&.clearance&.valid_at?(now)
 
@@ -63,7 +63,7 @@ module Scraper
 
     # The raw cached Entry (clearance + solve cost), valid or not.
     def entry(key)
-      @entries[key]
+      @backend.read(key)
     end
 
     # A valid clearance for the key: the cached one, or the outcome of a solve
@@ -71,28 +71,25 @@ module Scraper
     # the solve's error — UnsupportedChallenge, SolveFailed, SolveTimeout —
     # to the leader and every waiter alike, caching nothing.
     def clearance(key, url, challenge)
-      leader = false
-      flight = @guard.synchronize do
-        # Re-checked under the guard: a flight may have landed since the
-        # caller's last peek.
+      loop do
         cached = peek(key)
         return cached if cached
 
-        @flights[key] ||= begin
-          leader = true
-          Concurrent::Promises.resolvable_future
+        solver = @registry.for(challenge) # an unrouted kind fails before any flight
+        if (flight = @backend.lead(key))
+          return lead(key, url, challenge, solver, flight)
+        elsif (flight = @backend.join(key))
+          return flight.value!
         end
+        # The flight finished between lead and join: look again.
       end
-
-      solve(key, url, challenge, flight) if leader
-      flight.value!
     end
 
     # Drops the clearance the fast path found dead — but only if it is still
     # the cached one (an atomic compare-and-delete), so a caller holding a
     # stale clearance never evicts a fresher one another request has solved.
     def invalidate(key, clearance)
-      @entries.compute_if_present(key) { |entry| entry unless entry.clearance == clearance }
+      @backend.delete_if_current(key, clearance)
     end
 
     private
@@ -104,38 +101,40 @@ module Scraper
     # Starts a background re-solve unless one is already in flight for the key
     # (then it simply rides that one). Never waits on it.
     def refresh_ahead(key, url, entry)
-      flight = @guard.synchronize do
-        next if @flights.key?(key)
-
-        @flights[key] = Concurrent::Promises.resolvable_future
-      end
+      flight = @backend.lead(key)
       return unless flight
 
       @logger.info("[ClearanceStore] refresh-ahead started for #{key.site_id} (expires #{entry.clearance.expires_at.utc.iso8601}, last solve #{entry.delta.round(1)}s)")
       Concurrent::Promises.future_on(@executor) do
-        solve(key, url, entry.challenge, flight)
-        if flight.fulfilled?
-          @logger.info("[ClearanceStore] refresh-ahead completed for #{key.site_id} in #{@entries[key].delta.round(1)}s")
-        else
-          @logger.warn("[ClearanceStore] refresh-ahead failed for #{key.site_id}: #{flight.reason.message} — still serving the current clearance")
-        end
+        lead(key, url, entry.challenge, @registry.for(entry.challenge), flight, refreshing: true)
+        @logger.info("[ClearanceStore] refresh-ahead completed for #{key.site_id} in #{@backend.read(key).delta.round(1)}s")
+      rescue StandardError => error
+        @logger.warn("[ClearanceStore] refresh-ahead failed for #{key.site_id}: #{error.message} — still serving the current clearance")
       end
     end
 
-    # The leader's half: run the one solve, publish its outcome to the flight,
-    # then retire the flight so the next miss starts afresh.
-    def solve(key, url, challenge, flight)
+    # The leader's half: run the one solve, publish its outcome to the flight
+    # (waking every waiter, in this process or another), then retire it. A
+    # reactive leader first re-checks the cache — a solve may have landed while
+    # it raced for the flight; a refresh-ahead leader must solve regardless.
+    def lead(key, url, challenge, solver, flight, refreshing: false)
+      if !refreshing && (cached = peek(key))
+        flight.fulfill(cached)
+        return cached
+      end
+
       started = @clock.call
-      clearance = @registry.for(challenge).solve(url, challenge)
-      @entries[key] = Entry.new(clearance: clearance, delta: @clock.call - started, challenge: challenge)
+      clearance = solver.solve(url, challenge, **{ proxy: key.proxy }.compact) # no proxy: the plain call
+      finished = @clock.call
+      @backend.write(key, Entry.new(clearance: clearance, delta: finished - started, challenge: challenge),
+        ttl: clearance.expires_at - finished)
       flight.fulfill(clearance)
+      clearance
     rescue StandardError => error
       flight.reject(error)
+      raise
     ensure
-      @guard.synchronize { @flights.delete(key) }
-      # Never leave waiters parked on a flight the leader abandoned (e.g. its
-      # thread was killed mid-solve).
-      flight.reject(SolveFailed.new("the solve was aborted"), false) unless flight.resolved?
+      flight.finish
     end
   end
 end

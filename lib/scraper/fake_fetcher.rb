@@ -11,7 +11,7 @@ module Scraper
     end
 
     # Serves the responses in order; the last one repeats for any further fetch.
-    def fetch(_url, ua: nil, cookies: {}, headers: {})
+    def fetch(_url, ua: nil, cookies: {}, headers: {}, proxy: nil)
       @responses.size > 1 ? @responses.shift : @responses.first
     end
   end
