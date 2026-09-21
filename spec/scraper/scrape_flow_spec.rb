@@ -61,6 +61,23 @@ RSpec.describe Scraper::ScrapeFlow do
     end
   end
 
+  # A clean 200 that parses to nothing is a structural anomaly (e.g. the layout
+  # moved past every selector), surfaced distinctly — never a silent empty
+  # success, and never routed to a solver.
+  context "when a clean page parses to zero products" do
+    let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>") }
+
+    it "returns an empty result flagged degraded: zero_results" do
+      expect(result.results).to eq([])
+      expect(result.degraded).to eq("zero_results")
+      expect(solver.calls).to eq(0)
+    end
+  end
+
+  it "reports degraded: nil when products were found" do
+    expect(result.degraded).to be_nil
+  end
+
   # Scenario A: fast path challenged -> one solve -> retried fast path clears.
   context "on a cold start against a challenging site" do
     let(:fetcher) { Scraper::FakeFetcher.new(responses: [challenged, cleared]) }

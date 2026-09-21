@@ -87,6 +87,17 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     end
   end
 
+  context "when the page parses to zero products" do
+    let(:responses) { [Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>")] }
+
+    it "returns 200 with empty results flagged degraded: zero_results" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body).to include("results" => [], "degraded" => "zero_results")
+    end
+  end
+
   # No route is drawn for an unsupported site, so it never reaches a controller.
   it "returns 404 for an unknown site" do
     get "/api/v1/amazon/search", params: { q: "ps5" }

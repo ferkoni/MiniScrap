@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<!--
+  LAYOUT-SHIFTED fixture: the real nissei card markup (see nissei_results.html)
+  with every primary selector's hook renamed or removed, so only the parser's
+  fallback selectors can match. Proves the layered selectors degrade gracefully.
+
+  Shifts vs. the real page:
+    * cards: no .products.wrapper / li.product-item — just li.item.product
+    * title: no a.product-item-link — the link sits in .product-item-name
+    * price: no [data-price-type=finalPrice] wrapper — a bare .price-box .price
+    * availability: no add-to-cart button — Magento's .stock markers instead
+  It also carries a wishlist-sidebar template card (no link), which must never
+  surface as a result.
+-->
+<html lang="es">
+<head><title>Resultados de búsqueda para: 'ps5'</title></head>
+<body>
+  <div class="search results">
+    <ol class="items">
+      <li class="item product">
+        <div class="details">
+          <strong class="product-item-name"><a href="https://nissei.com/py/consola-sony-playstation-5-slim">  Consola Sony PlayStation 5
+            Slim </a></strong>
+          <div class="price-box"><span class="price">Gs.&nbsp;4.290.000</span></div>
+          <div class="stock available"><span>En stock</span></div>
+        </div>
+      </li>
+      <li class="item product">
+        <div class="details">
+          <strong class="product-item-name"><a href="https://nissei.com/py/control-ps5-dualsense">Control PS5 DualSense</a></strong>
+          <div class="price-box"><span class="price">Gs.&nbsp;589.000</span></div>
+          <div class="stock unavailable"><span>Agotado</span></div>
+        </div>
+      </li>
+    </ol>
+  </div>
+  <div class="sidebar">
+    <ol class="product-items no-display">
+      <li class="product-item"><div class="product-item-details"><strong class="product-item-name"></strong></div></li>
+    </ol>
+  </div>
+</body>
+</html>
