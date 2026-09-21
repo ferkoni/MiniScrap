@@ -15,11 +15,11 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
   let(:responses) { [cleared] }
 
   before do
-    # The `fetcher` hook builds a Scraper::FakeFetcher; stub that one
-    # construction point to return a fetcher primed with `responses`, rather
-    # than reaching into an instance with allow_any_instance_of.
-    fake = Scraper::FakeFetcher.new(responses: responses)
-    allow(Scraper::FakeFetcher).to receive(:new).and_return(fake)
+    # The `fetcher` hook builds the real Scraper::CurlImpersonateFetcher; stub
+    # that one construction point to return a FakeFetcher primed with
+    # `responses`, rather than reaching into an instance with
+    # allow_any_instance_of. No subprocess ever runs.
+    allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(Scraper::FakeFetcher.new(responses: responses))
 
     # A fresh store per example stands in for the process-wide singleton, so a
     # clearance cached by one example never warms the next.
@@ -47,6 +47,27 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
       "title" => "PlayStation 5 Console",
       "position" => 1
     )
+  end
+
+  it "wires the real curl-impersonate fetcher with the site's profile" do
+    get "/api/v1/nissei/search", params: { q: "ps5" }
+
+    expect(Scraper::CurlImpersonateFetcher).to have_received(:new).with(hash_including(profile: :chrome131))
+  end
+
+  context "when the fast path cannot be fetched at all" do
+    before do
+      failing = Scraper::FakeFetcher.new
+      allow(failing).to receive(:fetch).and_raise(Scraper::FetchFailed, "curl: (6) Could not resolve host")
+      allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(failing)
+    end
+
+    it "returns 502 fetch_failed" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:bad_gateway)
+      expect(response.parsed_body).to eq("error" => "fetch_failed")
+    end
   end
 
   # No route is drawn for an unsupported site, so it never reaches a controller.
