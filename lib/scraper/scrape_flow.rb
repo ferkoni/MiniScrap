@@ -24,7 +24,7 @@ module Scraper
       started = monotonic_ms
       url = @site.url_for(path)
       key = ClearanceKey.new(site_id: @site.id)
-      clearance = @store.peek(key)
+      clearance = @store.peek(key, refresh_url: url) # may also refresh ahead, in the background
       browser_used = false
       retries = 0
 

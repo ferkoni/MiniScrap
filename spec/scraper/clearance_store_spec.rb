@@ -174,4 +174,135 @@ RSpec.describe Scraper::ClearanceStore do
       end
     end
   end
+
+  # Proactive refresh-ahead (XFetch, Vattani et al. VLDB 2015): a read of a
+  # still-valid clearance may start a background re-solve ahead of expiry, so
+  # active traffic never pays the periodic cold hit. The gate fires when
+  #   now + delta * beta * -ln(rand) >= expires_at
+  # with delta the measured cost of the last solve. rand and the clock are
+  # injected, so the gate is deterministic here.
+  describe "refresh-ahead" do
+    let(:t0) { Time.utc(2026, 1, 1, 12, 0, 0) }
+    let(:times) { [t0] }
+    let(:clock) { -> { times.last } }
+    let(:cost) { 10 } # seconds a solve takes, as measured by the store
+    let(:log) { StringIO.new }
+    let(:executor) { :immediate }
+    let(:store) do
+      described_class.new(
+        registry: Scraper::SolverRegistry.new(cloudflare_js: timed_solver),
+        clock: clock,
+        rand: -> { Math.exp(-1) }, # -ln(rand) == 1, so the expected lead is exactly delta * beta
+        beta: 1.0,
+        executor: executor,
+        logger: Logger.new(log)
+      )
+    end
+
+    # A solver whose solves take `cost` seconds of (injected) wall time, each
+    # returning a distinct clearance valid for 1800s from when it finished.
+    let(:timed_solver) do
+      times = self.times
+      cost = self.cost
+      Class.new do
+        include Scraper::Solver
+        attr_reader :calls
+
+        define_method(:solve) do |_url, _challenge|
+          @calls = @calls.to_i + 1
+          times << times.last + cost
+          Scraper::Clearance.new(cookies: { "cf_clearance" => "v#{@calls}" }, headers: {}, ua: "UA", expires_at: times.last + 1800)
+        end
+      end.new
+    end
+
+    let(:expires_at) { t0 + cost + 1800 }
+
+    before { store.clearance(key, url, challenge) }
+
+    def read_at(time)
+      times << time
+      store.peek(key, refresh_url: url)
+    end
+
+    it "records the measured cost of the solve" do
+      expect(store.entry(key).delta).to eq(cost)
+    end
+
+    it "fires at T - lead (lead = delta * beta)" do
+      read_at(expires_at - cost)
+      expect(timed_solver.calls).to eq(2)
+    end
+
+    it "does not fire at T - 2 * lead" do
+      read_at(expires_at - 2 * cost)
+      expect(timed_solver.calls).to eq(1)
+    end
+
+    it "replaces the entry with the refreshed clearance" do
+      read_at(expires_at - cost)
+      expect(store.peek(key).cookies).to eq("cf_clearance" => "v2")
+    end
+
+    it "never refreshes on a plain peek (no refresh_url)" do
+      times << expires_at - cost
+      store.peek(key)
+      expect(timed_solver.calls).to eq(1)
+    end
+
+    it "does not refresh a hard-expired clearance (the reactive path owns that)" do
+      expect(read_at(expires_at + 1)).to be_nil
+      expect(timed_solver.calls).to eq(1)
+    end
+
+    it "logs the background solve, which no request is waiting on" do
+      read_at(expires_at - cost)
+      expect(log.string).to include("refresh-ahead started", "refresh-ahead completed")
+    end
+
+    context "when the background solve fails" do
+      before do
+        allow(timed_solver).to receive(:solve).and_raise(Scraper::SolveFailed, "boom")
+      end
+
+      it "keeps serving the still-valid clearance and logs the failure" do
+        expect(read_at(expires_at - cost).cookies).to eq("cf_clearance" => "v1")
+        expect(store.peek(key).cookies).to eq("cf_clearance" => "v1")
+        expect(log.string).to include("refresh-ahead failed", "boom")
+      end
+    end
+
+    # Real background threads: the reader must return at once with the current
+    # clearance, and a crowd crossing the gate must share one solve.
+    context "with a real background executor" do
+      let(:executor) { :io }
+      let(:gated) { GatedSolver.new(-> { Scraper::Clearance.new(cookies: { "cf_clearance" => "fresh" }, headers: {}, ua: "UA", expires_at: expires_at + 1800) }) }
+
+      before do
+        # Swap the solver for a gated one only after the initial timed solve.
+        allow(timed_solver).to receive(:solve) { |url, challenge| gated.solve(url, challenge) }
+      end
+
+      it "serves the current clearance without waiting on the refresh" do
+        served = read_at(expires_at - cost)
+
+        expect(served.cookies).to eq("cf_clearance" => "v1")
+        expect(gated.wait_until_entered).to be(true)
+        gated.release
+      end
+
+      it "starts exactly one background solve for a crowd crossing the gate" do
+        times << expires_at - cost
+        readers = Array.new(5) { Thread.new { store.peek(key, refresh_url: url) } }
+        readers.each(&:join)
+        expect(gated.wait_until_entered).to be(true)
+        gated.release
+
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + GatedSolver::WAIT
+        Thread.pass until store.peek(key)&.cookies == { "cf_clearance" => "fresh" } || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        expect(store.peek(key).cookies).to eq("cf_clearance" => "fresh")
+        expect(gated.calls).to eq(1)
+      end
+    end
+  end
 end

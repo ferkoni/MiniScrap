@@ -11,10 +11,12 @@ module Api
       # Where the FlareSolverr service (the slow path's browser) listens.
       FLARESOLVERR_URL = ENV.fetch("FLARESOLVERR_URL", "http://localhost:8191")
 
-      # The production store: Cloudflare challenges routed to FlareSolverr.
+      # The production store: Cloudflare challenges routed to FlareSolverr;
+      # background refresh-ahead solves report to the Rails log.
       def self.build_clearance_store
         Scraper::ClearanceStore.new(
-          registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL))
+          registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL)),
+          logger: Rails.logger
         )
       end
 
