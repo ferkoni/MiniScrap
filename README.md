@@ -153,6 +153,11 @@ template shared the product-card class.
 
 ## 7. What I deliberately scoped out, and how I'd build it at scale
 
+- **Deployment.** It runs locally only. The generated `Dockerfile` and Kamal config know nothing
+  about the two external dependencies. Deploying means baking the pinned curl-impersonate release
+  into the image and running FlareSolverr (pinned `v3.5.2`) as a Kamal accessory on the **same
+  host**, since a clearance is bound to the egress IP. It also has to stay a single Puma process
+  until the store is shared, and the proxy's read timeout must outlast a cold solve.
 - **One process, in-memory store.** Multiple app servers would need a shared store (Redis) and a
   distributed single-flight lock, keyed by `(site, profile, egress IP)`, because a clearance is bound
   to its IP. `ClearanceKey` already has the `profile:` and `proxy:` slots.
