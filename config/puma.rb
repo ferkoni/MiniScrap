@@ -28,6 +28,17 @@
 threads_count = ENV.fetch("RAILS_MAX_THREADS", 3)
 threads threads_count, threads_count
 
+# MiniScrap must run as ONE Puma process. The ClearanceStore — the cached
+# browser clearance plus its single-flight lock — lives in process memory, so
+# each extra worker would hold its own cache and run its own browser solves.
+# Scale with threads (a cold request holds one for a whole ~15s solve), not
+# workers, until the store is shared (ISSUES.md slice #12).
+if ENV.fetch("WEB_CONCURRENCY", "0").to_i > 1
+  raise "WEB_CONCURRENCY=#{ENV["WEB_CONCURRENCY"]}: MiniScrap must run as a single Puma process " \
+        "(its clearance cache is per-process). Scale with RAILS_MAX_THREADS instead."
+end
+workers 0
+
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.
 port ENV.fetch("PORT", 3000)
 

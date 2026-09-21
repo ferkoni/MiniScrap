@@ -153,11 +153,9 @@ template shared the product-card class.
 
 ## 7. What I deliberately scoped out, and how I'd build it at scale
 
-- **Deployment.** It runs locally only. The generated `Dockerfile` and Kamal config know nothing
-  about the two external dependencies. Deploying means baking the pinned curl-impersonate release
-  into the image and running FlareSolverr (pinned `v3.5.2`) as a Kamal accessory on the **same
-  host**, since a clearance is bound to the egress IP. It also has to stay a single Puma process
-  until the store is shared, and the proxy's read timeout must outlast a cold solve.
+- **Multi-host deployment.** The Kamal setup (see *Deploying*) is deliberately **one host, one
+  process**: FlareSolverr must share the app's egress IP, and the clearance cache is per-process.
+  Going wider is the shared-store work below.
 - **One process, in-memory store.** Multiple app servers would need a shared store (Redis) and a
   distributed single-flight lock, keyed by `(site, profile, egress IP)`, because a clearance is bound
   to its IP. `ClearanceKey` already has the `profile:` and `proxy:` slots.
@@ -263,6 +261,9 @@ again.**
 | `FLARESOLVERR_URL` | `http://localhost:8191` | the FlareSolverr service |
 | `PORT` | `3000` | the Puma port |
 
+`GET /ready` reports whether curl-impersonate and FlareSolverr are both usable (`200` or `503`,
+naming each check).
+
 Background refresh-ahead solves (XFetch) don't appear in any response. Look for
 `[ClearanceStore] refresh-ahead …` lines in `log/development.log`.
 
@@ -297,3 +298,47 @@ LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real
 
 The live solver spec also refreshes `spec/fixtures/nissei_results.html`, one of the two real
 captured pages the parser is tested against (the other is `nissei_results_asus.html`). Keep live runs rare (see *Ethics* above).
+
+## Deploying
+
+The production image and a [Kamal](https://kamal-deploy.org) config are included. Everything runs on
+**one host**: the app and FlareSolverr must share an egress IP, because a clearance is bound to the
+IP that solved it.
+
+**What the image and config do:**
+- **The image** bakes in curl-impersonate **v1.5.6**, pinned by version and SHA-256 and verified at
+  build time, at `/opt/curl-impersonate`.
+- **Thruster** gets a 90s write timeout, so a cold solve can run to its deadline. Its gzip is off,
+  because gzip buffers the SSE stream into one lump.
+- **FlareSolverr `v3.5.2`** runs as a Kamal accessory (`miniscrap-flaresolverr`). It's never
+  published; the app reaches it over Kamal's Docker network.
+- **kamal-proxy** gets a 90s response timeout and unbuffered responses, for the same two reasons.
+  It health-checks `/up`.
+- **One Puma process, 16 threads.** `config/puma.rb` refuses `WEB_CONCURRENCY > 1`, because the
+  clearance cache is per-process memory.
+
+**First deploy:**
+
+```bash
+export MINISCRAP_SERVER=203.0.113.10          # your host (SSH as root by default)
+export KAMAL_REGISTRY_USERNAME=your-user      # ghcr.io user
+export KAMAL_REGISTRY_PASSWORD=ghp_…          # registry token
+bin/kamal setup                               # installs Docker, boots FlareSolverr + the app
+bin/smoke http://$MINISCRAP_SERVER            # ready → cold search → warm search → live stream
+```
+
+Later deploys are `bin/kamal deploy`. `bin/kamal ready` asks a running container whether
+curl-impersonate and FlareSolverr are both usable (`/ready`). `/up` stays liveness-only, so a
+browser outage shows up there and in monitoring rather than blocking a deploy.
+
+For HTTPS, set `proxy.host` and `ssl: true` in `config/deploy.yml`, then enable
+`config.assume_ssl` / `config.force_ssl`.
+
+**Upgrading either pin is one deliberate change.** Move the FlareSolverr image and the
+curl-impersonate version, profile and checksum together, since they have to stay close. Then rerun
+`LIVE=1 bundle exec rspec spec/live` and `bin/smoke`.
+
+`bin/smoke` was run against a local rehearsal of this setup: the built image plus FlareSolverr on a
+private Docker network, fronted by Thruster. It showed a cold solve (~13s), a warm hit (~1.5–3s), and
+an unbuffered stream. It also caught the gzip buffering described above.
+

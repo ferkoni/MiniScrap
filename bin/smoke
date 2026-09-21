@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+# Post-deploy smoke check against a running MiniScrap:
+#
+#   bin/smoke                         # http://localhost:3000
+#   bin/smoke https://miniscrap.example.com
+#
+# 1. /ready  — curl-impersonate and FlareSolverr are usable
+# 2. search  — a first search succeeds (cold if nothing is cached yet)
+# 3. search  — a second search rides the cached clearance (browser_used: false)
+# 4. stream  — ?stream=true events arrive as they happen, not in one buffered
+#              lump (i.e. no proxy in front is buffering or gzipping it)
+#
+# Talks to the live site through the app: one browser solve at most, a few
+# fetches. Exits non-zero on the first failed check.
+require "json"
+require "net/http"
+require "uri"
+
+base = URI(ARGV.fetch(0, "http://localhost:3000"))
+
+def check(name)
+  ok, detail = yield
+  puts "#{ok ? "✓" : "✗"} #{name} — #{detail}"
+  exit 1 unless ok
+end
+
+def get(base, path)
+  uri = URI.join(base, path)
+  Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", read_timeout: 120) { |http| http.get(uri.request_uri) }
+end
+
+check("ready") do
+  response = get(base, "/ready")
+  [response.code == "200", "#{response.code} #{response.body}"]
+end
+
+[["first search", "ps5"], ["second search (warm)", "xbox"]].each_with_index do |(name, query), index|
+  check(name) do
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    response = get(base, "/api/v1/nissei/search?q=#{query}")
+    seconds = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1)
+    body = JSON.parse(response.body)
+    ok = response.code == "200" && body["results"].to_a.any? && (index.zero? || body["browser_used"] == false)
+    [ok, "#{response.code} in #{seconds}s, #{body["results"].to_a.size} results, browser_used: #{body["browser_used"].inspect}#{" #{body}" unless response.code == "200"}"]
+  end
+end
+
+check("stream") do
+  # A never-seen query: a cached page answers in milliseconds, too fast to
+  # tell a live stream from a buffered one. Zero results is fine here.
+  uri = URI.join(base, "/api/v1/nissei/search?q=smoke#{Time.now.to_i}&stream=true")
+  arrivals = [] # [event, network read it arrived in, seconds since the request]
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", read_timeout: 120) do |http|
+    http.request(Net::HTTP::Get.new(uri.request_uri)) do |response|
+      read = 0
+      response.read_body do |chunk|
+        elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(1)
+        chunk.scan(/^event: (\w+)$/).flatten.each { |event| arrivals << [event, read, elapsed] }
+        read += 1
+      end
+    end
+  end
+  events = arrivals.map(&:first)
+  # A proxy that buffers delivers the whole body at once, so fast_path and done
+  # share a read; a live stream flushes fast_path before the fetch starts.
+  streamed = arrivals.size >= 2 && arrivals.first[1] != arrivals.last[1]
+  [events.first == "fast_path" && events.last == "done" && streamed,
+   arrivals.map { |event, read, at| "#{event}@#{at}s(read #{read})" }.join(" ") + (streamed ? "" : " — buffered by a proxy?")]
+end
+
+puts "smoke ok"

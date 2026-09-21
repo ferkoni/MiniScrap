@@ -49,3 +49,7 @@
 # Ignore Docker-related files
 /.dockerignore
 /Dockerfile*
+
+# Tests and captured fixtures are not part of the production image.
+/spec/
+/.idea/

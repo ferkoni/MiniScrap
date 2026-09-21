@@ -5,6 +5,10 @@ Rails.application.routes.draw do
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
 
+  # Readiness: can this instance actually scrape? Checks curl-impersonate and
+  # FlareSolverr. Kept separate from /up so a down browser never blocks a deploy.
+  get "ready" => "readiness#show"
+
   # API routes are defined under the api/v1 namespace, one explicit line per
   # supported site. An unknown site has no route and so returns 404.
   namespace :api do
