@@ -6,11 +6,12 @@ module Api
     class NisseiController < ScrapeController
       scrapes "nissei",
         base_url: "https://nissei.com/py/",
-        profile: :chrome131,
+        profile: :chrome146, # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
         parser: Scraper::NisseiParser.new
 
+      # nissei runs Magento: its search lives at catalogsearch/result.
       def search
-        scrape("search?q=#{CGI.escape(params[:q].to_s)}")
+        scrape("catalogsearch/result/?q=#{CGI.escape(params[:q].to_s)}")
       end
     end
   end

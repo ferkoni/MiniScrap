@@ -8,6 +8,7 @@ abort("The Rails environment is running in production mode!") if Rails.env.produ
 # that will avoid rails generators crashing because migrations haven't been run yet
 # return unless Rails.env.test?
 require 'rspec/rails'
+require 'webmock/rspec'
 # Add additional requires below this line. Rails is not loaded until this point!
 
 # Requires supporting ruby files with custom matchers and macros, etc, in
@@ -28,6 +29,16 @@ require 'rspec/rails'
 RSpec.configure do |config|
   # This app has no database, so ActiveRecord support is turned off entirely.
   config.use_active_record = false
+
+  # WebMock blocks real Ruby HTTP everywhere except :live specs, which talk to
+  # real services (FlareSolverr) on purpose. (curl is a subprocess, so WebMock
+  # never sees it either way.)
+  config.around(:each, :live) do |example|
+    WebMock.allow_net_connect!
+    example.run
+  ensure
+    WebMock.disable_net_connect!
+  end
 
   # RSpec Rails uses metadata to mix in different behaviours to your tests,
   # for example enabling you to call `get` and `post` in request specs. e.g.:

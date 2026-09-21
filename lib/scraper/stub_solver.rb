@@ -1,8 +1,8 @@
 module Scraper
   # A Solver that returns a fixed Clearance instead of driving a browser — no
-  # Docker, no network. Two roles, like FakeFetcher: the spec injection seam
-  # (it counts its `calls` so specs can assert how many solves happened), and
-  # the default :cloudflare_js solver until FlareSolverrSolver lands in slice #6.
+  # Docker, no network. The spec injection seam: it counts its `calls` so specs
+  # can assert how many solves happened. Production routes :cloudflare_js to
+  # FlareSolverrSolver.
   class StubSolver
     include Solver
 

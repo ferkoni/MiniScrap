@@ -42,3 +42,8 @@ group :development, :test do
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
 end
+
+group :test do
+  # Stubs the FlareSolverr HTTP layer (the fast path is a subprocess, so it is injected instead) [https://github.com/bblimke/webmock]
+  gem "webmock"
+end
