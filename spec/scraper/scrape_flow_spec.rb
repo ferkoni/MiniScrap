@@ -48,6 +48,11 @@ RSpec.describe Scraper::ScrapeFlow do
       expect(result.results.map(&:title)).to include("PlayStation 5 Console")
     end
 
+    it "offers the store a chance to refresh ahead on every read" do
+      expect(store).to receive(:peek).with(key, refresh_url: url).and_call_original
+      result
+    end
+
     it "fetches the site's composed URL with no clearance on a cold store" do
       expect(fetcher).to receive(:fetch)
         .with(url, ua: nil, cookies: {}, headers: {})
