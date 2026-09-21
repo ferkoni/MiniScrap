@@ -7,8 +7,11 @@ module Scraper
   # shared ClearanceStore -> bounded retry -> parse. The fast path always goes
   # first, presenting a cached clearance when the store holds one; a challenge
   # means that clearance (if any) is dead, so it is dropped and a fresh one is
-  # resolved, up to `max_retries` times.
+  # resolved, up to `max_retries` times. A cleared page that parses to zero
+  # products comes back flagged degraded: "zero_results".
   class ScrapeFlow
+    ZERO_RESULTS = "zero_results".freeze
+
     def initialize(site:, fetcher:, detector:, store:, max_retries: 1)
       @site = site
       @fetcher = fetcher
@@ -38,12 +41,16 @@ module Scraper
         response = fetch(url, clearance)
       end
 
+      results = @site.parser.parse(response.body)
       ScrapeResult.new(
         site: @site.id,
-        results: @site.parser.parse(response.body),
+        results: results,
         browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
-        degraded: nil # zero-products structural-anomaly detection arrives in slice #7
+        # A cleared page with nothing on it is a structural anomaly (most
+        # likely a layout the parser no longer understands), not a challenge:
+        # flag it rather than return a silent empty success.
+        degraded: (ZERO_RESULTS if results.empty?)
       )
     end
 
