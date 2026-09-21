@@ -1,4 +1,5 @@
 require "rails_helper"
+require_relative "../support/gated_solver"
 
 # The orchestrator runs Rails-free: built from a Site + injected collaborators,
 # it returns a ScrapeResult with no controller, no HTTP, no browser.
@@ -168,6 +169,37 @@ RSpec.describe Scraper::ScrapeFlow do
     it "does not parse the challenge body" do
       expect(site.parser).not_to receive(:parse)
       expect { result }.to raise_error(Scraper::UnsupportedChallenge)
+    end
+  end
+
+  # Scenario C: a cold herd sharing one store rides a single solve. The fetcher
+  # clears only a request presenting the solved cookie, so every flow must have
+  # picked up the one clearance to succeed.
+  context "when a cold herd arrives at once" do
+    let(:clearance) { Scraper::Clearance.new(cookies: { "cf_clearance" => "solved" }, headers: {}, ua: "UA", expires_at: times.last + 1800) }
+    let(:gated) { GatedSolver.new(-> { clearance }) }
+    let(:store) { Scraper::ClearanceStore.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), clock: clock) }
+    let(:fetcher) do
+      cleared = self.cleared
+      challenged = self.challenged
+      Class.new do
+        include Scraper::Fetcher
+
+        define_method(:fetch) do |_url, ua: nil, cookies: {}, headers: {}|
+          cookies.key?("cf_clearance") ? cleared : challenged
+        end
+      end.new
+    end
+
+    it "returns a browser-cleared ScrapeResult to every caller from one solve" do
+      threads = Array.new(5) { Thread.new { run_flow } }
+      gated.wait_until_entered
+      GatedSolver.wait_until_blocked(threads)
+      gated.release
+
+      results = threads.map(&:value)
+      expect(results).to all(have_attributes(browser_used: true, results: be_present))
+      expect(gated.calls).to eq(1)
     end
   end
 end

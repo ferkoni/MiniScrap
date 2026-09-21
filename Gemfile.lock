@@ -318,6 +318,7 @@ DEPENDENCIES
   bootsnap
   brakeman
   bundler-audit
+  concurrent-ruby
   debug
   kamal
   nokogiri

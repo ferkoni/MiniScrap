@@ -89,6 +89,32 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     end
   end
 
+  context "when the solve fails" do
+    let(:responses) { [challenged] }
+
+    before { allow(solver).to receive(:solve).and_raise(Scraper::SolveFailed) }
+
+    it "returns 502 solve_failed" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:bad_gateway)
+      expect(response.parsed_body).to eq("error" => "solve_failed")
+    end
+  end
+
+  context "when the solve exceeds its deadline" do
+    let(:responses) { [challenged] }
+
+    before { allow(solver).to receive(:solve).and_raise(Scraper::SolveTimeout) }
+
+    it "returns 504 solve_timeout" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:gateway_timeout)
+      expect(response.parsed_body).to eq("error" => "solve_timeout")
+    end
+  end
+
   context "when the fetch is challenged and no solver is registered" do
     let(:registry) { Scraper::SolverRegistry.new }
     let(:responses) { [challenged] }
