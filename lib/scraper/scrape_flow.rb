@@ -3,39 +3,62 @@ module Scraper
   # interfaces and *returns* a ScrapeResult (or raises) — it knows nothing about
   # Rails, JSON, or HTTP.
   #
-  # This slice runs fetch -> detect -> parse -> return. A detected challenge has
-  # no solver wired yet, so it is raised as UnsupportedChallenge; the reactive
-  # solve + retry and the ClearanceStore arrive in later slices and slot in
-  # between detection and the parse without changing this contract.
+  # fast fetch -> detect -> (on a challenge) resolve a clearance through the
+  # shared ClearanceStore -> bounded retry -> parse. The fast path always goes
+  # first, presenting a cached clearance when the store holds one; a challenge
+  # means that clearance (if any) is dead, so it is dropped and a fresh one is
+  # resolved, up to `max_retries` times.
   class ScrapeFlow
-    def initialize(site:, fetcher:, detector:)
+    def initialize(site:, fetcher:, detector:, store:, max_retries: 1)
       @site = site
       @fetcher = fetcher
       @detector = detector
+      @store = store
+      @max_retries = max_retries
     end
 
     def run(path)
       started = monotonic_ms
-      response = @fetcher.fetch(@site.url_for(path), ua: nil, cookies: {}, headers: {})
+      url = @site.url_for(path)
+      key = ClearanceKey.new(site_id: @site.id)
+      clearance = @store.peek(key)
+      browser_used = false
+      retries = 0
 
-      if (challenge = @detector.detect(response))
-        # No solver is registered in this slice, so any detected challenge is
-        # unsupported; slice #3 routes it through a SolverRegistry instead.
-        raise UnsupportedChallenge, challenge.kind
+      response = fetch(url, clearance)
+      while (challenge = @detector.detect(response))
+        # Whatever we presented did not clear — expired early or never worked —
+        # so drop it before this request or the next one reuses it.
+        @store.invalidate(key, clearance) if clearance
+        raise RetryBudgetExhausted if retries >= @max_retries
+
+        retries += 1
+        clearance = @store.clearance(key, url, challenge)
+        browser_used = true
+        response = fetch(url, clearance)
       end
-
-      results = @site.parser.parse(response.body)
 
       ScrapeResult.new(
         site: @site.id,
-        results: results,
-        browser_used: false,
+        results: @site.parser.parse(response.body),
+        browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
         degraded: nil # zero-products structural-anomaly detection arrives in slice #7
       )
     end
 
     private
+
+    # Replays the clearance's cookies, headers, and UA together — they are bound
+    # to each other — or fetches bare when there is none.
+    def fetch(url, clearance)
+      @fetcher.fetch(
+        url,
+        ua: clearance&.ua,
+        cookies: clearance&.cookies || {},
+        headers: clearance&.headers || {}
+      )
+    end
 
     def monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)

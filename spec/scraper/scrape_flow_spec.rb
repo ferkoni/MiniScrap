@@ -1,11 +1,21 @@
 require "rails_helper"
 
-# The orchestrator runs Rails-free: built from a Site + an injected Fetcher,
+# The orchestrator runs Rails-free: built from a Site + injected collaborators,
 # it returns a ScrapeResult with no controller, no HTTP, no browser.
 RSpec.describe Scraper::ScrapeFlow do
   let(:html) { Rails.root.join("spec/fixtures/nissei_search.html").read }
-  let(:fetcher) { Scraper::FakeFetcher.new(body: html) }
+  let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: html) }
+  let(:challenged) { Scraper::Response.new(status: 403, headers: {}, body: "Just a moment...") }
+
+  let(:fetcher) { Scraper::FakeFetcher.new(response: cleared) }
   let(:detector) { Scraper::CompositeDetector.new([Scraper::CloudflareDetector.new]) }
+
+  let(:times) { [Time.utc(2026, 1, 1, 12, 0, 0)] }
+  let(:clock) { -> { times.last } }
+  let(:solver) { Scraper::StubSolver.new(clock: clock, ttl: 1800) }
+  let(:store) { Scraper::ClearanceStore.new(registry: Scraper::SolverRegistry.new(cloudflare_js: solver), clock: clock) }
+  let(:key) { Scraper::ClearanceKey.new(site_id: "nissei") }
+
   let(:site) do
     Scraper::Site.new(
       id: "nissei",
@@ -14,36 +24,140 @@ RSpec.describe Scraper::ScrapeFlow do
       parser: Scraper::NisseiParser.new
     )
   end
+  let(:url) { "https://nissei.com/py/search?q=ps5" }
 
-  subject(:result) do
-    described_class.new(site: site, fetcher: fetcher, detector: detector).run("search?q=ps5")
+  def run_flow
+    described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
   end
 
-  it "returns a ScrapeResult for the site" do
-    expect(result).to be_a(Scraper::ScrapeResult)
-    expect(result.site).to eq("nissei")
+  subject(:result) { run_flow }
+
+  context "when the fast path is not challenged" do
+    it "returns a ScrapeResult for the site" do
+      expect(result).to be_a(Scraper::ScrapeResult)
+      expect(result.site).to eq("nissei")
+    end
+
+    it "marks the fast path as browser_used: false with a recorded latency" do
+      expect(result.browser_used).to be(false)
+      expect(result.latency_ms).to be_a(Numeric).and be >= 0
+    end
+
+    it "parses the fetched body through the site's parser" do
+      expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+    end
+
+    it "fetches the site's composed URL with no clearance on a cold store" do
+      expect(fetcher).to receive(:fetch)
+        .with(url, ua: nil, cookies: {}, headers: {})
+        .and_call_original
+      result
+    end
+
+    it "never solves" do
+      result
+      expect(solver.calls).to eq(0)
+    end
   end
 
-  it "marks the fast path as browser_used: false with a recorded latency" do
-    expect(result.browser_used).to be(false)
-    expect(result.latency_ms).to be_a(Numeric).and be >= 0
+  # Scenario A: fast path challenged -> one solve -> retried fast path clears.
+  context "on a cold start against a challenging site" do
+    let(:fetcher) { Scraper::FakeFetcher.new(responses: [challenged, cleared]) }
+
+    it "solves exactly once and returns the parsed results with browser_used: true" do
+      expect(result.browser_used).to be(true)
+      expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+      expect(solver.calls).to eq(1)
+    end
+
+    it "retries the fast path presenting the clearance's cookies and UA together" do
+      expect(fetcher).to receive(:fetch).with(url, ua: nil, cookies: {}, headers: {}).ordered.and_call_original
+      expect(fetcher).to receive(:fetch)
+        .with(url, ua: Scraper::StubSolver::UA, cookies: Scraper::StubSolver::COOKIES, headers: {})
+        .ordered.and_call_original
+      result
+    end
+
+    it "caches the clearance in the shared store" do
+      result
+      expect(store.peek(key)).to be_a(Scraper::Clearance)
+    end
   end
 
-  it "parses the fetched body through the site's parser" do
-    expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+  # Scenario B: a second flow sharing the store rides the cached clearance.
+  context "on a warm request" do
+    let(:fetcher) { Scraper::FakeFetcher.new(responses: [challenged, cleared]) }
+
+    before { run_flow }
+
+    it "presents the cached clearance on the first fetch and skips the solve" do
+      warm_fetcher = Scraper::FakeFetcher.new(response: cleared)
+      expect(warm_fetcher).to receive(:fetch)
+        .with(url, ua: Scraper::StubSolver::UA, cookies: Scraper::StubSolver::COOKIES, headers: {})
+        .and_call_original
+
+      warm = described_class.new(site: site, fetcher: warm_fetcher, detector: detector, store: store).run("search?q=ps5")
+
+      expect(warm.browser_used).to be(false)
+      expect(solver.calls).to eq(1)
+    end
+
+    it "re-solves once the clearance's TTL has elapsed" do
+      times << times.first + 1801
+      expired_fetcher = Scraper::FakeFetcher.new(responses: [challenged, cleared])
+      expect(expired_fetcher).to receive(:fetch).with(url, ua: nil, cookies: {}, headers: {}).ordered.and_call_original
+      expect(expired_fetcher).to receive(:fetch).with(url, hash_including(ua: Scraper::StubSolver::UA)).ordered.and_call_original
+
+      expired = described_class.new(site: site, fetcher: expired_fetcher, detector: detector, store: store).run("search?q=ps5")
+
+      expect(expired.browser_used).to be(true)
+      expect(solver.calls).to eq(2)
+    end
   end
 
-  it "fetches the site's composed search URL" do
-    expect(fetcher).to receive(:fetch)
-      .with("https://nissei.com/py/search?q=ps5", ua: nil, cookies: {}, headers: {})
-      .and_call_original
-    result
+  # Early death: a cached clearance that dies before its TTL draws a fresh 403;
+  # the flow drops it and re-solves, within the same retry budget.
+  context "when a cached clearance died early" do
+    let(:fetcher) { Scraper::FakeFetcher.new(responses: [challenged, cleared]) }
+
+    before { run_flow }
+
+    it "invalidates it, re-solves, and succeeds on the retry" do
+      dead = store.peek(key)
+      recovering = Scraper::FakeFetcher.new(responses: [challenged, cleared])
+      expect(store).to receive(:invalidate).with(key, dead).and_call_original
+
+      recovered = described_class.new(site: site, fetcher: recovering, detector: detector, store: store).run("search?q=ps5")
+
+      expect(recovered.browser_used).to be(true)
+      expect(solver.calls).to eq(2)
+    end
   end
 
-  # A detected challenge has no solver wired in this slice, so the flow fails
-  # honestly rather than parsing an interstitial into empty results.
-  context "when the fetched Response carries a challenge" do
-    let(:fetcher) { Scraper::FakeFetcher.new(status: 403, body: "Just a moment...") }
+  # With max_retries = 1, a freshly solved clearance that still draws a
+  # challenge exhausts the budget rather than looping on the browser.
+  context "when the retried fast path is still challenged" do
+    let(:fetcher) { Scraper::FakeFetcher.new(response: challenged) }
+
+    it "raises RetryBudgetExhausted after a single solve" do
+      expect { result }.to raise_error(Scraper::RetryBudgetExhausted)
+      expect(solver.calls).to eq(1)
+    end
+
+    it "drops the clearance that failed so the next request starts cold" do
+      expect { result }.to raise_error(Scraper::RetryBudgetExhausted)
+      expect(store.peek(key)).to be_nil
+    end
+
+    it "does not parse the challenge body" do
+      expect(site.parser).not_to receive(:parse)
+      expect { result }.to raise_error(Scraper::RetryBudgetExhausted)
+    end
+  end
+
+  context "when the detected challenge has no registered solver" do
+    let(:fetcher) { Scraper::FakeFetcher.new(response: challenged) }
+    let(:store) { Scraper::ClearanceStore.new(registry: Scraper::SolverRegistry.new, clock: clock) }
 
     it "raises UnsupportedChallenge carrying the detected kind" do
       expect { result }.to raise_error(Scraper::UnsupportedChallenge) do |error|
