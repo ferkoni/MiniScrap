@@ -1,0 +1,13 @@
+# Local development only: FlareSolverr, the slow path's browser. Production uses
+# the Kamal accessory in config/deploy.yml, which must stay on the same tag —
+# FlareSolverr's Chromium has to stay close to the curl-impersonate profile.
+#
+#   docker compose up -d        (or run it from your IDE)
+#   docker compose down
+services:
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    # Loopback only: FlareSolverr has no authentication.
+    ports:
+      - "127.0.0.1:8191:8191"
+    restart: unless-stopped
