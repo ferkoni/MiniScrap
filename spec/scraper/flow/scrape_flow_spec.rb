@@ -1,5 +1,5 @@
 require "rails_helper"
-require_relative "../support/gated_solver"
+require_relative "../../support/gated_solver"
 
 # The orchestrator runs Rails-free: built from a Site + injected collaborators,
 # it returns a ScrapeResult with no controller, no HTTP, no browser.
