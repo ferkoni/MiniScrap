@@ -1,6 +1,6 @@
 require "rails_helper"
-require_relative "../../support/gated_solver"
-require_relative "../../support/redis_helper"
+require_relative "../../../support/gated_solver"
+require_relative "../../../support/redis_helper"
 
 # What only a shared store can promise: guarantees that hold ACROSS processes.
 # Each "process" here is its own ClearanceStore + RedisBackend with its own

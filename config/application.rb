@@ -30,6 +30,13 @@ module MiniScrap
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
 
+    # lib/scraper is grouped into subsystem folders (flow, fetching, ...) that
+    # are organisation only: constants stay Scraper::X. clearance/clearance_store
+    # is a real namespace (Scraper::ClearanceStore::*) and is not collapsed.
+    %w[flow fetching detection solving clearance parsing events].each do |subsystem|
+      Rails.autoloaders.main.collapse(Rails.root.join("lib/scraper", subsystem))
+    end
+
     # Configuration for the application, engines, and railties goes here.
     #
     # These settings can be overridden in specific environments using the files

@@ -1,6 +1,6 @@
 require "rails_helper"
-require_relative "../support/gated_solver"
-require_relative "../support/redis_helper"
+require_relative "../../support/gated_solver"
+require_relative "../../support/redis_helper"
 
 # The reactive store: solve on a miss, serve a valid clearance until it
 # expires, and drop one the fast path reports dead — with a per-key
