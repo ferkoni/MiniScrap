@@ -243,6 +243,10 @@ docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr
 curl -s localhost:8191/     # {"msg": "FlareSolverr is ready!", "version": "3.5.2", …}
 ```
 
+Or, with the same image and port, from `docker-compose.yml` (which also runs from an IDE such as
+RubyMine): `docker compose up -d`, and `docker compose down` to stop it. Keep its tag in step with
+`config/deploy.yml`.
+
 It only does work on a cold start or when a clearance dies. Stop it with
 `docker rm -f flaresolverr`.
 
