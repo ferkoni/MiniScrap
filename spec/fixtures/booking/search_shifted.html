@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!-- Hand-made. Booking's card, link, title and image data-testid hooks are
+     removed, so only the structural fallbacks (ARIA roles, the title's <h3>,
+     the image's alt) can find them. Also covers what the real capture lacks:
+     a property with no reviews and no rating, and a card without a link. -->
+<html lang="es">
+<body>
+  <div role="list">
+    <div role="listitem" aria-label="Posada del Río">
+      <img src="https://cf.bstatic.com/xdata/images/hotel/square240/1.webp" alt="Posada del Río">
+      <h3><a href="https://www.booking.com/hotel/py/posada-del-rio.es.html?aid=304142&amp;label=x">
+        <div>Posada del
+          Río</div>
+      </a></h3>
+      <span data-testid="address-link">Asunción</span>
+      <span data-testid="distance">a 3 km del centro</span>
+      <div data-testid="rating-stars"><span></span><span></span></div>
+      <div data-testid="review-score"><div>Puntuación: 8,0 </div><div aria-hidden="true">8,0</div><div aria-hidden="false"><div>Muy bien </div><div>20 comentarios</div></div></div>
+      <div data-testid="price-for-x-nights">8 noches, 2 adultos</div>
+      <span data-testid="price-and-discounted-price">US$150</span>
+      <div data-testid="taxes-and-charges">+ US$15 de impuestos y cargos</div>
+    </div>
+    <div role="listitem" aria-label="Casa Nueva">
+      <img src="https://cf.bstatic.com/xdata/images/hotel/square240/2.webp" alt="Casa Nueva">
+      <h3><a href="https://www.booking.com/hotel/py/casa-nueva.es.html"><div></div></a></h3>
+      <span data-testid="price-and-discounted-price">US$90</span>
+    </div>
+    <div role="listitem" aria-label="Template">
+      <h3><span>No link</span></h3>
+    </div>
+  </div>
+</body>
+</html>

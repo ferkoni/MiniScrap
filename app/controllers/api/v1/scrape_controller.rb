@@ -15,7 +15,8 @@ module Api
       # Where the FlareSolverr service (the slow path's browser) listens.
       FLARESOLVERR_URL = ENV.fetch("FLARESOLVERR_URL", "http://localhost:8191")
 
-      # The production store: Cloudflare challenges routed to FlareSolverr;
+      # The production store: Cloudflare and AWS WAF challenges routed to
+      # FlareSolverr, one solver per protection (AWS WAF: see AwsWafDetector);
       # background refresh-ahead solves report to the Rails log. With
       # REDIS_URL the cache and its single-flight lock are shared by every
       # process (so Puma may run workers, and several hosts may share it);
@@ -28,7 +29,15 @@ module Api
         end
 
         Scraper::ClearanceStore.new(
-          registry: Scraper::SolverRegistry.new(cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL)),
+          registry: Scraper::SolverRegistry.new(
+            cloudflare_js: Scraper::FlareSolverrSolver.new(base_url: FLARESOLVERR_URL),
+            # FlareSolverr doesn't recognise AWS WAF's challenge, so the browser
+            # is kept running for challenge.js to earn its token. AWS WAF honours
+            # a solve for 300 s by default, far less than the cookie's own expiry.
+            aws_waf: Scraper::FlareSolverrSolver.new(
+              base_url: FLARESOLVERR_URL, clearance_cookie: "aws-waf-token", wait: 10, ttl: 300
+            )
+          ),
           backend: backend,
           logger: Rails.logger
         )
@@ -59,6 +68,22 @@ module Api
 
       rescue_from Scraper::Error do |error|
         render json: error_body(error), status: ERROR_STATUS.fetch(error.class, :internal_server_error)
+      end
+
+      # Raised by an action whose typed params don't validate; `details` maps
+      # each bad param to what's wrong with it. Rendered as a 400 before any
+      # fetch happens.
+      class InvalidParams < StandardError
+        attr_reader :details
+
+        def initialize(details)
+          @details = details
+          super("invalid params: #{details.keys.join(", ")}")
+        end
+      end
+
+      rescue_from InvalidParams do |error|
+        render json: { error: "invalid_params", details: error.details }, status: :bad_request
       end
 
       # Class-level DSL: declares the one Site this controller scrapes. `parser`
