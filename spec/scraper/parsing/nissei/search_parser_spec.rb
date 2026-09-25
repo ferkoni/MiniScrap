@@ -3,12 +3,12 @@ require "rails_helper"
 # Offline parser spec against saved pages — no network, no browser.
 RSpec.describe Scraper::Nissei::SearchParser do
   def parse(fixture)
-    described_class.new.parse(Rails.root.join("spec/fixtures", fixture).read)
+    described_class.new.parse(Rails.root.join("spec/fixtures/nissei", fixture).read)
   end
 
   # A real cleared nissei search page for "ps5", captured by the live solver spec.
   describe "the real captured results page" do
-    subject(:results) { parse("nissei_results.html") }
+    subject(:results) { parse("results.html") }
 
     it "returns one Product per product in the listing" do
       expect(results.length).to eq(20)
@@ -49,7 +49,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
   # A second, independently captured real page (a "smartphone" search) whose
   # cards carry Amasty promo labels ("Delivery Gratis", "Solo Online").
   describe "a second real results page with promo labels" do
-    subject(:results) { parse("nissei_results_smartphone.html") }
+    subject(:results) { parse("results_smartphone.html") }
 
     it "extracts every product with clean fields" do
       expect(results.length).to eq(45)
@@ -101,7 +101,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
 
   # The sidebar's filter block (Amasty layered navigation) on the smartphone page.
   describe "filters on a real results page" do
-    subject(:page) { described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei_results_smartphone.html").read) }
+    subject(:page) { described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei/results_smartphone.html").read) }
 
     let(:filters) { page.filters }
 
@@ -175,7 +175,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
   # A second real page, so the filter selectors hold beyond one capture. Its
   # labels carry nissei's stray whitespace ("Negro - Azul ").
   describe "filters on the ps5 results page" do
-    subject(:filters) { described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei_results.html").read).filters }
+    subject(:filters) { described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei/results.html").read).filters }
 
     it "reads every group" do
       expect(filters.categories.length).to eq(11)
@@ -192,7 +192,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
 
   # Every primary selector's hook is renamed or removed; only fallbacks match.
   describe "a layout-shifted page" do
-    subject(:results) { parse("nissei_results_shifted.html") }
+    subject(:results) { parse("results_shifted.html") }
 
     it "still extracts every product through the fallback selectors" do
       expect(results.map(&:title)).to eq(["Consola Sony PlayStation 5 Slim", "Control PS5 DualSense"])
@@ -207,13 +207,13 @@ RSpec.describe Scraper::Nissei::SearchParser do
     end
 
     it "returns empty filters when the page has no filter block" do
-      filters = described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei_results_shifted.html").read).filters
+      filters = described_class.new.parse_page(Rails.root.join("spec/fixtures/nissei/results_shifted.html").read).filters
       expect(filters.to_h).to eq(categories: [], brands: [], colors: [])
     end
   end
 
   describe "the synthetic walking-skeleton page" do
-    subject(:results) { parse("nissei_search.html") }
+    subject(:results) { parse("search.html") }
 
     it "still parses" do
       expect(results.map(&:title)).to include("PlayStation 5 Console")

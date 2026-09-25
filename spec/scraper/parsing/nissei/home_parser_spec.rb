@@ -3,12 +3,12 @@ require "rails_helper"
 # Offline parser spec against a saved page — no network, no browser.
 RSpec.describe Scraper::Nissei::HomeParser do
   def parse(fixture)
-    described_class.new.parse(Rails.root.join("spec/fixtures", fixture).read)
+    described_class.new.parse(Rails.root.join("spec/fixtures/nissei", fixture).read)
   end
 
   # A real cleared nissei home page.
   describe "the real captured home page" do
-    subject(:sections) { parse("nissei_home.html") }
+    subject(:sections) { parse("home.html") }
 
     def section(name)
       sections.find { |s| s.name == name }

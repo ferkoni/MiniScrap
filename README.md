@@ -331,8 +331,8 @@ The `:live` specs hit the real network, so they're opt-in and never run in CI. T
 LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real solve against nissei
 ```
 
-The live solver spec also refreshes `spec/fixtures/nissei_results.html`, one of the two real
-captured pages the parser is tested against (the other is `nissei_results_smartphone.html`, whose cards carry the promo labels). Keep live runs rare (see *Ethics* above).
+The live solver spec also refreshes `spec/fixtures/nissei/results.html`, one of the two real
+captured search pages the parser is tested against (the other is `results_smartphone.html`, whose cards carry the promo labels). Keep live runs rare (see *Ethics* above).
 
 ## Deploying
 
