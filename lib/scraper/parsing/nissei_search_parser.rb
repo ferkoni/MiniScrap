@@ -37,7 +37,7 @@ module Scraper
       {
         title: title,
         price: squish(lazy_first_selector_match(card, PRICE_SELECTORS)&.text),
-        online_only:  online_only(card),
+        online_only: online_only(card),
         free_delivery: free_delivery(card),
         url: link["href"]
       }
