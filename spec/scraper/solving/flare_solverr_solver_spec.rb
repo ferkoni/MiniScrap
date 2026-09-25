@@ -131,6 +131,66 @@ RSpec.describe Scraper::FlareSolverrSolver do
 
   # Readiness, for GET /ready: is the browser service up at all? A cheap GET,
   # never a solve.
+  # AWS WAF (Booking): FlareSolverr doesn't recognise the challenge, so it
+  # needs a wait to let challenge.js finish, and the prize is aws-waf-token.
+  context "when configured for AWS WAF" do
+    subject(:solver) do
+      described_class.new(base_url: "http://flaresolverr.test:8191", clearance_cookie: "aws-waf-token", wait: 10, ttl: 300, clock: -> { now })
+    end
+
+    let(:url) { "https://www.booking.com/searchresults.es.html?ss=Asuncion" }
+    let(:challenge) { Scraper::Challenge.new(kind: :aws_waf, evidence: { status: 202, body: 'id="challenge-container"' }) }
+    let(:cookies) do
+      [
+        { "name" => "aws-waf-token", "value" => "token", "domain" => ".booking.com", "expiry" => (now + 4 * 86_400).to_i },
+        { "name" => "bkng", "value" => "session", "domain" => ".booking.com" }
+      ]
+    end
+
+    it "asks FlareSolverr to keep the browser running for the wait" do
+      flaresolverr_replies(solved)
+      solver.solve(url, challenge)
+
+      expect(WebMock).to have_requested(:post, endpoint)
+        .with(body: { cmd: "request.get", url: url, maxTimeout: 60_000, waitInSeconds: 10 })
+    end
+
+    it "accepts aws-waf-token as the proof of a solve" do
+      flaresolverr_replies(solved)
+
+      expect(solver.solve(url, challenge).cookies).to eq("aws-waf-token" => "token", "bkng" => "session")
+    end
+
+    # The token cookie lives 4 days; AWS WAF honours a solve far less (300 s by default).
+    it "caps the clearance at the ttl, not the cookie's own expiry" do
+      flaresolverr_replies(solved)
+
+      expect(solver.solve(url, challenge).expires_at).to eq(now + 300)
+    end
+
+    # FlareSolverr returned mid-challenge (e.g. the wait was too short).
+    it "raises SolveFailed when the browser earned no aws-waf-token" do
+      flaresolverr_replies(solved(cookies: [{ "name" => "bkng", "value" => "session" }]))
+
+      expect { solver.solve(url, challenge) }.to raise_error(Scraper::SolveFailed, /aws-waf-token/)
+    end
+
+    it "gives the HTTP read the wait on top of the deadline" do
+      flaresolverr_replies(solved)
+      allow(Net::HTTP).to receive(:start).and_call_original
+      solver.solve(url, challenge)
+
+      expect(Net::HTTP).to have_received(:start).with("flaresolverr.test", 8191, hash_including(read_timeout: 60 + 10 + described_class::READ_GRACE))
+    end
+  end
+
+  it "sends no wait and requires cf_clearance by default (Cloudflare)" do
+    flaresolverr_replies(solved(cookies: [{ "name" => "aws-waf-token", "value" => "token" }]))
+
+    expect { solver.solve(url, challenge) }.to raise_error(Scraper::SolveFailed, /cf_clearance/)
+    expect(WebMock).to have_requested(:post, endpoint).with { |request| !JSON.parse(request.body).key?("waitInSeconds") }
+  end
+
   describe "#ready?" do
     let(:root) { "http://flaresolverr.test:8191/" }
 

@@ -5,6 +5,9 @@ MiniScrap is a small Rails API that returns clean JSON search results from
 managed challenge**. The interesting part isn't the scraping. It's getting in: how to beat a
 challenge that needs a real browser **without** putting a browser on every request.
 
+A second site, [Booking.com](https://www.booking.com/) hotel search behind **AWS WAF's JavaScript
+challenge**, runs on the same design, unchanged (see *Booking* below).
+
 ```
 GET /api/v1/nissei/search?q=ps5
 ```
@@ -30,6 +33,35 @@ card, read by one shared `Nissei::CardExtractor`. It shares search's clearance, 
 
 Measured against the live site: the **first** request pays one browser solve (~14s, `browser_used:
 true`). **Every request after that** reuses the result over plain HTTP (~3s, `browser_used: false`).
+
+### Booking
+
+```
+GET /api/v1/booking/search?dest_id=-910015&dest_type=city&checkin=2026-09-30&checkout=2026-10-08&adults=2
+GET /api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&offset=15
+```
+```jsonc
+{ "site": "booking",
+  "results": [ { "name": "Danieri Asunción Hotel",
+                 "url": "https://www.booking.com/hotel/py/di-danieri.es.html",
+                 "address": "Asunción", "distance": "a 6,9 km del centro",
+                 "review_score": "8,3", "review_label": "Muy bien", "review_count": "1.056 comentarios",
+                 "stars": 3, "stars_kind": "official",
+                 "price": "US$714", "taxes_note": "+ US$71 de impuestos y cargos",
+                 "stay": "8 noches, 2 adultos", "image_url": "https://cf.bstatic.com/…",
+                 "position": 5 }, … ],
+  "browser_used": false, "latency_ms": 1250, "degraded": null }
+```
+
+- **Typed params, not a pasted URL.** The destination is `dest_id` + `dest_type`, or free-text
+  `ss` (`dest_id` wins when both are given). Then `checkin`, `checkout`, `adults`, `rooms`,
+  `children` and `offset`. Invalid input is a `400` listing every bad param, before any fetch.
+  The URL sent to Booking is rebuilt from these alone, with the currency pinned to USD. None of
+  Booking's tracking or session params (`sid`, `aid`, `label`, …) are ever forwarded.
+- **Positions are absolute across pages:** with `offset=15`, the first result is position 16.
+- **The challenge is AWS WAF's**, not Cloudflare's: a `202` whose script earns an `aws-waf-token`
+  cookie and reloads. `AwsWafDetector` recognises it; FlareSolverr solves it once, and the fast
+  path replays the token. Measured live: a cold solve takes ~12s, a warm request ~1.3s.
 
 ---
 
@@ -142,9 +174,9 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 
 | Layer | Pieces |
 |---|---|
-| Edge (Rails) | `ScrapeController` (wiring, JSON/SSE rendering, error → status) · `NisseiController` (declares the site) |
+| Edge (Rails) | `ScrapeController` (wiring, JSON/SSE rendering, error → status, `400 invalid_params`) · `NisseiController`, `BookingController` (declare the site) |
 | Orchestrator | `ScrapeFlow`: fast fetch → detect → single-flight solve → bounded retry → parse |
-| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`Nissei::SearchParser`, `Nissei::HomeParser`, sharing `Nissei::CardExtractor`) · `EventSink` |
+| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `AwsWafDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`Nissei::SearchParser`, `Nissei::HomeParser`, sharing `Nissei::CardExtractor`; `Booking::SearchParser`) · `EventSink` |
 | Shared state | `ClearanceStore`: the one long-lived mutable object |
 
 | To add… | You write… | Untouched |
@@ -152,6 +184,13 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 | a site | a ~5-line controller subclass (`scrapes "…", base_url:, profile:, parser:`) + a route | flow, store |
 | a protection (e.g. DataDome) | a detector returning `Challenge(:datadome)` + one registry entry | flow, controllers |
 | an endpoint | a one-line action building a path + a route | everything else |
+
+**Booking tested this table.** Adding it took a controller, a route, a parser, a detector and a
+registry entry, as the table says, with `ScrapeFlow` and `ClearanceStore` untouched. It also
+exposed two Cloudflare assumptions in `FlareSolverrSolver`, which became per-instance settings:
+the name of the cookie that proves a solve (`cf_clearance` vs `aws-waf-token`), and a `wait`.
+FlareSolverr only recognises Cloudflare's challenge; on AWS WAF's it returns at once, before the
+challenge script has earned its token, so the browser is kept running 10s longer.
 
 An unrecognised protection raises `UnsupportedChallenge`, which is a `501`, rather than failing
 silently. Other failures map to honest statuses: `502` for `solve_failed`, `retry_budget_exhausted`
@@ -200,6 +239,14 @@ template shared the product-card class.
   (60s plus a 10s read grace) bounds them.
 - A blocking cold request holds a Puma thread for the whole solve (~14s). Size the pool, or use
   the stream.
+- Booking's solve depends on a fixed 10s wait, and on FlareSolverr *not* recognising AWS WAF's
+  challenge (it returns normally, and the wait lets the script finish). 10s worked; the minimum
+  is unknown. Re-check it live when upgrading FlareSolverr.
+- Booking's clearance is capped at 300s, AWS WAF's default immunity time. The token cookie claims
+  4 days, and the real server-side lifetime wasn't measured, since measuring it takes sustained
+  traffic. A cap that's too long costs one challenged fast fetch, then a fresh solve.
+- A visible CAPTCHA (as opposed to the silent challenge) can't be solved and isn't attempted: the
+  solve returns no token and the API answers `502 solve_failed`.
 
 ## Ethics and the target site
 
@@ -208,8 +255,14 @@ service. This is a private, read-only, **low-volume** practice project in the sa
 that scraping APIs operate in commercially. Live traffic is kept to a trickle: tests run offline
 against saved pages, and a live solve is a single, opt-in spec.
 
+Booking's terms explicitly forbid automated access, a bigger step than nissei. Its fixtures come
+from one live test of 4 page loads (a challenged fetch, two FlareSolverr solves, one warm fetch),
+with no user cookies and no tracking params, and were scrubbed of session ids. There is no live
+Booking spec; the same trickle rule applies.
+
 *On naming the site:* this README names nissei openly because the repo is private and the code
-itself is nissei-specific (`NisseiController`, `Scraper::Nissei` parsers, fixtures). A public release should
+itself is site-specific (`NisseiController`, `BookingController`, the `Scraper::Nissei` and
+`Scraper::Booking` parsers, fixtures). A public release should
 revisit that and anonymize both the prose and the site-specific code.
 
 ---
@@ -272,6 +325,7 @@ bin/dev                     # = bin/rails server, on http://localhost:3000 (PORT
 curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
 curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events (-N: don't buffer)
 curl 'localhost:3000/api/v1/nissei/home'                         # home page carousels + category showcases
+curl 'localhost:3000/api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&adults=2'
 curl 'localhost:3000/up'                                         # health check
 ```
 

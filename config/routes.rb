@@ -15,6 +15,7 @@ Rails.application.routes.draw do
     namespace :v1 do
       get "nissei/search", to: "nissei#search"
       get "nissei/home", to: "nissei#home"
+      get "booking/search", to: "booking#search"
     end
   end
 end
