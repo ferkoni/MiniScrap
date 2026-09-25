@@ -3,11 +3,19 @@ module Scraper
   # responding to #to_h (ScrapeFlow flags an empty list "zero_results").
   #
   #   parse(html) -> [record]
+  #   parse_page(html) -> ParsedPage   # what ScrapeFlow calls
   #
-  # Impls: NisseiSearchParser (product Results), NisseiHomeParser (Sections). A parser is site-specific and owned by a Site.
+  # parse_page wraps parse with no filters; a parser whose page also offers
+  # search filters overrides it.
+  #
+  # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (Sections). A parser is site-specific and owned by a Site.
   module Parser
     def parse(_html)
       raise NotImplementedError, "#{self.class} must implement #parse"
+    end
+
+    def parse_page(html)
+      ParsedPage.new(results: parse(html), filters: nil)
     end
 
     def lazy_first_selector_match(node, selectors)

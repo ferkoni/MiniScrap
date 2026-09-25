@@ -27,7 +27,7 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
     get "/api/v1/nissei/home"
   end
 
-  it "returns 200 with the same JSON contract as search" do
+  it "returns 200 with search's JSON contract, minus filters (the home page has none)" do
     get "/api/v1/nissei/home"
 
     expect(response).to have_http_status(:ok)

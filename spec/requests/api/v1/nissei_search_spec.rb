@@ -31,7 +31,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
 
     expect(response).to have_http_status(:ok)
     body = response.parsed_body
-    expect(body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
+    expect(body.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "degraded")
     expect(body["site"]).to eq("nissei")
     expect(body["browser_used"]).to be(false)
     expect(body["latency_ms"]).to be_a(Numeric)
@@ -42,11 +42,40 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     get "/api/v1/nissei/search", params: { q: "ps5" }
 
     first = response.parsed_body["results"].first
-    expect(first.keys).to contain_exactly("title", "price", "online_only", "free_delivery", "url", "position")
+    expect(first.keys).to contain_exactly(
+      "title", "price", "old_price", "discount", "online_only", "free_delivery", "url", "image_url", "position"
+    )
     expect(first).to include(
       "title" => "PlayStation 5 Console",
       "position" => 1
     )
+  end
+
+  # The synthetic page has no filter block, so the shape holds with empty lists.
+  it "always returns the filters shape, empty when the page offers none" do
+    get "/api/v1/nissei/search", params: { q: "ps5" }
+
+    expect(response.parsed_body["filters"]).to eq("categories" => [], "brands" => [], "colors" => [])
+  end
+
+  context "when the page has a filter block" do
+    let(:html) { Rails.root.join("spec/fixtures/nissei_results_smartphone.html").read }
+
+    it "serializes categories as a tree, and brands and colors as options" do
+      get "/api/v1/nissei/search", params: { q: "smartphone" }
+
+      filters = response.parsed_body["filters"]
+      expect(filters["categories"].first).to include("label" => "Informática", "value" => "170")
+      expect(filters["categories"].first["children"].first).to include(
+        "label" => "Monitores, Periféricos y Accesorios",
+        "children" => [a_hash_including("label" => "Auriculares Gaming y Micrófonos", "children" => [])]
+      )
+      expect(filters["brands"].first).to eq(
+        "label" => "Argom", "value" => "1598",
+        "url" => "https://nissei.com/py/catalogsearch/result/index/?marca=1598&q=smartphone"
+      )
+      expect(filters["colors"].first).to include("label" => "Negro", "value" => "4672")
+    end
   end
 
   it "wires the real curl-impersonate fetcher with the site's profile" do
@@ -226,7 +255,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
       get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
       done = sse_events.last.last
 
-      expect(done.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
+      expect(done.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "degraded")
       expect(done).to include("site" => "nissei", "browser_used" => true)
       expect(done["results"].first).to include("title" => "PlayStation 5 Console", "position" => 1)
     end
