@@ -22,7 +22,7 @@ RSpec.describe Scraper::ScrapeFlow do
       id: "nissei",
       base_url: "https://nissei.com/py/",
       profile: :chrome131,
-      parser: Scraper::NisseiParser.new
+      parser: Scraper::NisseiSearchParser.new
     )
   end
   let(:url) { "https://nissei.com/py/search?q=ps5" }

@@ -8,7 +8,7 @@ module Scraper
   # wishlist sidebar's Knockout template, which shares the .product-item class)
   # is not a product and is skipped. If every card selector misses, the parse
   # is empty and ScrapeFlow flags the result degraded: "zero_results".
-  class NisseiParser
+  class NisseiSearchParser
     include Parser
 
     # The main result listing first: a bare .product-item also matches the
@@ -16,30 +16,41 @@ module Scraper
     CARD_SELECTORS = [".products.wrapper li.product-item", "ol.products li.product-item", "li.item.product"].freeze
     TITLE_SELECTORS = ["a.product-item-link", ".product-item-name a", "a[title]"].freeze
     PRICE_SELECTORS = ["[data-price-type=finalPrice] .price", ".price-box .price", ".price"].freeze
+    ONLINE_AND_DELIVERY_SELECTORS = [".amlabel-text", ".amasty-label-container"].freeze
+    ONLINE_ONLY = "Solo Online".freeze
+    FREE_DELIVERY = "Delivery Gratis".freeze
 
-    # nissei cards carry no stock text: an in-stock card has an add-to-cart
-    # form, while Magento marks an out-of-stock one with .stock.unavailable.
-    OUT_OF_STOCK_SELECTORS = [".stock.unavailable", ".out-of-stock"].freeze
-    IN_STOCK_SELECTORS = ["form[data-role=tocart-form]", "button.tocart", ".stock.available"].freeze
+    Result = Data.define(:title, :price, :online_only, :free_delivery, :url, :position)
 
     def parse(html)
-      products = cards(Nokogiri::HTML(html)).filter_map { |card| extract(card) }
+      products = cards(Nokogiri::HTML5(html)).filter_map { |card| extract(card) }
       products.each_with_index.map { |fields, index| Result.new(**fields, position: index + 1) }
     end
 
     private
 
     def extract(card)
-      link = first_match(card, TITLE_SELECTORS)
+      link = lazy_first_selector_match(card, TITLE_SELECTORS)
       title = squish(link&.text).presence || link&.[]("title")
       return unless title.present? && link["href"].present?
 
       {
         title: title,
-        price: squish(first_match(card, PRICE_SELECTORS)&.text),
-        availability: availability(card),
+        price: squish(lazy_first_selector_match(card, PRICE_SELECTORS)&.text),
+        online_only: online_only(card),
+        free_delivery: free_delivery(card),
         url: link["href"]
       }
+    end
+
+    def online_only(card)
+      nodes = first_selector_match(card, ONLINE_AND_DELIVERY_SELECTORS)
+      nodes.map { |n| squish(n.text) }.join.include?(ONLINE_ONLY)
+    end
+
+    def free_delivery(card)
+      nodes = first_selector_match(card, ONLINE_AND_DELIVERY_SELECTORS)
+      nodes.map { |n| squish(n.text) }.join.include?(FREE_DELIVERY)
     end
 
     # The first selector that matches any cards wins; an empty NodeSet otherwise.
@@ -49,23 +60,6 @@ module Scraper
         return found if found.any?
       end
       Nokogiri::XML::NodeSet.new(doc, [])
-    end
-
-    def availability(card)
-      return "out_of_stock" if first_match(card, OUT_OF_STOCK_SELECTORS)
-      return "in_stock" if first_match(card, IN_STOCK_SELECTORS)
-
-      nil
-    end
-
-    def first_match(node, selectors)
-      selectors.lazy.filter_map { |selector| node.at_css(selector) }.first
-    end
-
-    # Collapses runs of whitespace — including the non-breaking space nissei
-    # puts after "Gs." — into single spaces.
-    def squish(text)
-      text&.gsub(/[[:space:]]+/, " ")&.strip
     end
   end
 end

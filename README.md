@@ -11,10 +11,16 @@ GET /api/v1/nissei/search?q=ps5
 ```jsonc
 { "site": "nissei",
   "results": [ { "title": "Juego PS5 Saros", "price": "Gs. 520.000",
-                 "availability": "in_stock", "url": "https://nissei.com/py/juego-ps5-saros",
+                 "online_only": false, "free_delivery": false,
+                 "url": "https://nissei.com/py/juego-ps5-saros",
                  "position": 1 }, … ],
   "browser_used": true, "latency_ms": 13893, "degraded": null }
 ```
+
+`GET /api/v1/nissei/home` returns the same envelope, but each result is a section of the home page
+(`recommended`, `may_like`, `continue_buying`, `gift_ideas`, `best_sellers`, then one `category`
+per showcase), each holding products with `price`, `old_price`, `discount`, `online_only`,
+`free_delivery`, `url` and `image_url`. It shares search's clearance, so it never pays its own solve.
 
 Measured against the live site: the **first** request pays one browser solve (~14s, `browser_used:
 true`). **Every request after that** reuses the result over plain HTTP (~3s, `browser_used: false`).
@@ -132,7 +138,7 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 |---|---|
 | Edge (Rails) | `ScrapeController` (wiring, JSON/SSE rendering, error → status) · `NisseiController` (declares the site) |
 | Orchestrator | `ScrapeFlow`: fast fetch → detect → single-flight solve → bounded retry → parse |
-| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`NisseiParser`) · `EventSink` |
+| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`NisseiSearchParser`, `NisseiHomeParser`) · `EventSink` |
 | Shared state | `ClearanceStore`: the one long-lived mutable object |
 
 | To add… | You write… | Untouched |
@@ -146,8 +152,8 @@ silently. Other failures map to honest statuses: `502` for `solve_failed`, `retr
 or `fetch_failed`, and `504` for `solve_timeout`.
 
 The parser uses **layered selectors** (a primary selector with fallbacks for every field) and emits
-a source-agnostic shape (`availability` is `in_stock` / `out_of_stock` / `nil`, never nissei's
-wording). A hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks
+a source-agnostic shape. nissei's promo labels ("Solo Online", "Delivery Gratis") become the
+booleans `online_only` and `free_delivery` rather than nissei's wording. A hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks
 work. Checking the parser against the real page also caught a phantom result: a wishlist-sidebar
 template shared the product-card class.
 
@@ -197,7 +203,7 @@ that scraping APIs operate in commercially. Live traffic is kept to a trickle: t
 against saved pages, and a live solve is a single, opt-in spec.
 
 *On naming the site:* this README names nissei openly because the repo is private and the code
-itself is nissei-specific (`NisseiController`, `NisseiParser`, fixtures). A public release should
+itself is nissei-specific (`NisseiController`, `NisseiSearchParser`, fixtures). A public release should
 revisit that and anonymize both the prose and the site-specific code.
 
 ---
@@ -259,6 +265,7 @@ bin/dev                     # = bin/rails server, on http://localhost:3000 (PORT
 ```bash
 curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
 curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events (-N: don't buffer)
+curl 'localhost:3000/api/v1/nissei/home'                         # home page carousels + category showcases
 curl 'localhost:3000/up'                                         # health check
 ```
 
@@ -319,7 +326,7 @@ LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real
 ```
 
 The live solver spec also refreshes `spec/fixtures/nissei_results.html`, one of the two real
-captured pages the parser is tested against (the other is `nissei_results_asus.html`). Keep live runs rare (see *Ethics* above).
+captured pages the parser is tested against (the other is `nissei_results_smartphone.html`, whose cards carry the promo labels). Keep live runs rare (see *Ethics* above).
 
 ## Deploying
 
