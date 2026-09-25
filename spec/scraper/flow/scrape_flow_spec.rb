@@ -22,7 +22,7 @@ RSpec.describe Scraper::ScrapeFlow do
       id: "nissei",
       base_url: "https://nissei.com/py/",
       profile: :chrome131,
-      parser: Scraper::NisseiSearchParser.new
+      parser: Scraper::Nissei::SearchParser.new
     )
   end
   let(:url) { "https://nissei.com/py/search?q=ps5" }
@@ -46,6 +46,10 @@ RSpec.describe Scraper::ScrapeFlow do
 
     it "parses the fetched body through the site's parser" do
       expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+    end
+
+    it "carries the parser's filters alongside the results" do
+      expect(result.filters).to be_a(Scraper::Nissei::SearchParser::Filters)
     end
 
     it "offers the store a chance to refresh ahead on every read" do

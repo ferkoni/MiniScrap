@@ -11,16 +11,22 @@ GET /api/v1/nissei/search?q=ps5
 ```jsonc
 { "site": "nissei",
   "results": [ { "title": "Juego PS5 Saros", "price": "Gs. 520.000",
+                 "old_price": null, "discount": null,
                  "online_only": false, "free_delivery": false,
                  "url": "https://nissei.com/py/juego-ps5-saros",
+                 "image_url": "https://nissei.com/media/catalog/product/…",
                  "position": 1 }, … ],
+  "filters": { "categories": […], "brands": […], "colors": […] },
   "browser_used": true, "latency_ms": 13893, "degraded": null }
 ```
 
-`GET /api/v1/nissei/home` returns the same envelope, but each result is a section of the home page
+Search also returns `filters`: the sidebar's category tree, brands and colors, each option with
+nissei's filter id (`value`) and the `url` that applies it.
+
+`GET /api/v1/nissei/home` returns the same envelope (without `filters`), but each result is a section of the home page
 (`recommended`, `may_like`, `continue_buying`, `gift_ideas`, `best_sellers`, then one `category`
-per showcase), each holding products with `price`, `old_price`, `discount`, `online_only`,
-`free_delivery`, `url` and `image_url`. It shares search's clearance, so it never pays its own solve.
+per showcase), each holding products in the same shape as search's: both pages render the same
+card, read by one shared `Nissei::CardExtractor`. It shares search's clearance, so it never pays its own solve.
 
 Measured against the live site: the **first** request pays one browser solve (~14s, `browser_used:
 true`). **Every request after that** reuses the result over plain HTTP (~3s, `browser_used: false`).
@@ -138,7 +144,7 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 |---|---|
 | Edge (Rails) | `ScrapeController` (wiring, JSON/SSE rendering, error → status) · `NisseiController` (declares the site) |
 | Orchestrator | `ScrapeFlow`: fast fetch → detect → single-flight solve → bounded retry → parse |
-| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`NisseiSearchParser`, `NisseiHomeParser`) · `EventSink` |
+| Strategies | `Fetcher` (`CurlImpersonateFetcher`) · `ChallengeDetector` (`CloudflareDetector`, `CompositeDetector`) · `Solver` + `SolverRegistry` (`FlareSolverrSolver`) · `Parser` (`Nissei::SearchParser`, `Nissei::HomeParser`, sharing `Nissei::CardExtractor`) · `EventSink` |
 | Shared state | `ClearanceStore`: the one long-lived mutable object |
 
 | To add… | You write… | Untouched |
@@ -203,7 +209,7 @@ that scraping APIs operate in commercially. Live traffic is kept to a trickle: t
 against saved pages, and a live solve is a single, opt-in spec.
 
 *On naming the site:* this README names nissei openly because the repo is private and the code
-itself is nissei-specific (`NisseiController`, `NisseiSearchParser`, fixtures). A public release should
+itself is nissei-specific (`NisseiController`, `Scraper::Nissei` parsers, fixtures). A public release should
 revisit that and anonymize both the prose and the site-specific code.
 
 ---

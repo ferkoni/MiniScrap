@@ -46,10 +46,12 @@ module Scraper
         response = fetch(url, clearance, attempt: retries + 1)
       end
 
-      results = @site.parser.parse(response.body)
+      page = @site.parser.parse_page(response.body)
+      results = page.results
       ScrapeResult.new(
         site: @site.id,
         results: results,
+        filters: page.filters,
         browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
         # A cleared page with nothing on it is a structural anomaly (most

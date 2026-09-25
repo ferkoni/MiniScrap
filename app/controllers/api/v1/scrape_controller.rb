@@ -141,14 +141,17 @@ module Api
         self.class.clearance_store
       end
 
+      # `filters` appears only for a page that offers them (e.g. search).
       def serialize(result)
-        {
+        body = {
           site: result.site,
           results: result.results.map(&:to_h),
+          filters: result.filters&.to_h,
           browser_used: result.browser_used,
           latency_ms: result.latency_ms,
           degraded: result.degraded
         }
+        result.filters ? body : body.except(:filters)
       end
 
       # Error payload: a snake_case tag derived from the error class, plus the

@@ -7,7 +7,7 @@ module Api
       scrapes "nissei",
         base_url: "https://nissei.com/py/",
         profile: :chrome146, # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
-        parser: Scraper::NisseiSearchParser.new
+        parser: Scraper::Nissei::SearchParser.new
 
       # nissei runs Magento: its search lives at catalogsearch/result.
       def search
@@ -15,7 +15,7 @@ module Api
       end
 
       # The home page is carousels and category showcases, not a result list.
-      HOME_PARSER = Scraper::NisseiHomeParser.new
+      HOME_PARSER = Scraper::Nissei::HomeParser.new
 
       def home
         scrape("", parser: HOME_PARSER)

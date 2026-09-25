@@ -1,7 +1,7 @@
 require "rails_helper"
 
 # Offline parser spec against a saved page — no network, no browser.
-RSpec.describe Scraper::NisseiHomeParser do
+RSpec.describe Scraper::Nissei::HomeParser do
   def parse(fixture)
     described_class.new.parse(Rails.root.join("spec/fixtures", fixture).read)
   end
@@ -39,7 +39,7 @@ RSpec.describe Scraper::NisseiHomeParser do
 
     it "extracts every card of every section" do
       expect(sections.map { |s| s.products.length }).to eq([10, 12, 12, 12, 11, 14, 14, 14, 14, 14, 14, 18, 14])
-      expect(sections.flat_map(&:products)).to all(be_a(described_class::Product))
+      expect(sections.flat_map(&:products)).to all(be_a(Scraper::Nissei::CardExtractor::Product))
     end
 
     it "extracts clean fields from a discounted card" do
