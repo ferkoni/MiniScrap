@@ -5,7 +5,7 @@ require "rails_helper"
 # depth by nissei_search_spec; this spec covers what the home endpoint adds:
 # its path, its own parser, and a shared clearance with search.
 RSpec.describe "GET /api/v1/nissei/home", type: :request do
-  let(:html) { Rails.root.join("spec/fixtures/nissei_home.html").read }
+  let(:html) { Rails.root.join("spec/fixtures/nissei/home.html").read }
   let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: html) }
   let(:challenged) { Scraper::Response.new(status: 403, headers: {}, body: "Just a moment...") }
 
@@ -66,7 +66,7 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
   it "leaves search on the search parser" do
     get "/api/v1/nissei/home"
     allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(
-      Scraper::FakeFetcher.new(responses: [Scraper::Response.new(status: 200, headers: {}, body: Rails.root.join("spec/fixtures/nissei_search.html").read)])
+      Scraper::FakeFetcher.new(responses: [Scraper::Response.new(status: 200, headers: {}, body: Rails.root.join("spec/fixtures/nissei/search.html").read)])
     )
     get "/api/v1/nissei/search", params: { q: "ps5" }
 

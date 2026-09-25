@@ -9,7 +9,7 @@ require "rails_helper"
 #   LIVE=1 bundle exec rspec spec/live/flare_solverr_solver_spec.rb
 #
 # One solve + one fetch against nissei per run — keep it rare. On success it
-# refreshes the captured fixture spec/fixtures/nissei_results.html.
+# refreshes the captured fixture spec/fixtures/nissei/results.html.
 RSpec.describe Scraper::FlareSolverrSolver, :live do
   let(:url) { "https://nissei.com/py/catalogsearch/result/?q=ps5" }
   let(:challenge) { Scraper::Challenge.new(kind: :cloudflare_js, evidence: {}) }
@@ -28,6 +28,6 @@ RSpec.describe Scraper::FlareSolverrSolver, :live do
     expect(response.status).to eq(200)
     expect(response.body).to include("product-item-link")
 
-    Rails.root.join("spec/fixtures/nissei_results.html").write(response.body)
+    Rails.root.join("spec/fixtures/nissei/results.html").write(response.body)
   end
 end

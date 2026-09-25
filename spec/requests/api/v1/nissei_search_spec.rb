@@ -3,7 +3,7 @@ require "rails_helper"
 # Drives the full edge path with a FakeFetcher and StubSolver injected — no
 # network, no browser.
 RSpec.describe "GET /api/v1/nissei/search", type: :request do
-  let(:html) { Rails.root.join("spec/fixtures/nissei_search.html").read }
+  let(:html) { Rails.root.join("spec/fixtures/nissei/search.html").read }
   let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: html) }
   let(:challenged) { Scraper::Response.new(status: 403, headers: {}, body: "Just a moment...") }
 
@@ -59,7 +59,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
   end
 
   context "when the page has a filter block" do
-    let(:html) { Rails.root.join("spec/fixtures/nissei_results_smartphone.html").read }
+    let(:html) { Rails.root.join("spec/fixtures/nissei/results_smartphone.html").read }
 
     it "serializes categories as a tree, and brands and colors as options" do
       get "/api/v1/nissei/search", params: { q: "smartphone" }

@@ -4,7 +4,7 @@ require_relative "../../support/gated_solver"
 # The orchestrator runs Rails-free: built from a Site + injected collaborators,
 # it returns a ScrapeResult with no controller, no HTTP, no browser.
 RSpec.describe Scraper::ScrapeFlow do
-  let(:html) { Rails.root.join("spec/fixtures/nissei_search.html").read }
+  let(:html) { Rails.root.join("spec/fixtures/nissei/search.html").read }
   let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: html) }
   let(:challenged) { Scraper::Response.new(status: 403, headers: {}, body: "Just a moment...") }
 
