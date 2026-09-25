@@ -1,7 +1,7 @@
 require "rails_helper"
 
 # Offline parser spec against saved pages — no network, no browser.
-RSpec.describe Scraper::NisseiParser do
+RSpec.describe Scraper::NisseiSearchParser do
   def parse(fixture)
     described_class.new.parse(Rails.root.join("spec/fixtures", fixture).read)
   end
@@ -12,21 +12,27 @@ RSpec.describe Scraper::NisseiParser do
 
     it "returns one Result per product in the listing" do
       expect(results.length).to eq(20)
-      expect(results).to all(be_a(Scraper::Result))
+      expect(results).to all(be_a(described_class::Result))
     end
 
     it "extracts clean fields from a card" do
       expect(results.first).to have_attributes(
         title: "Juego PS5 Saros",
         price: "Gs. 520.000",
-        availability: "in_stock",
+        online_only: false,
+        free_delivery: false,
         url: "https://nissei.com/py/juego-ps5-saros",
         position: 1
       )
     end
 
     it "fills every field on every card" do
-      expect(results).to all(have_attributes(title: be_present, price: start_with("Gs. "), availability: "in_stock", url: start_with("https://nissei.com/py/")))
+      expect(results).to all(have_attributes(title: be_present, price: start_with("Gs. "), url: start_with("https://nissei.com/py/")))
+    end
+
+    # This capture predates nissei's promo labels: no card carries one.
+    it "flags no card as online-only or free-delivery" do
+      expect(results).to all(have_attributes(online_only: false, free_delivery: false))
     end
 
     it "numbers positions 1-based in document order" do
@@ -40,21 +46,45 @@ RSpec.describe Scraper::NisseiParser do
     end
   end
 
-  # A second, independently captured real page (an "asus" search), so the
-  # selectors are proven on more than the page they were written against.
-  describe "a second real results page" do
-    subject(:results) { parse("nissei_results_asus.html") }
+  # A second, independently captured real page (a "smartphone" search) whose
+  # cards carry Amasty promo labels ("Delivery Gratis", "Solo Online").
+  describe "a second real results page with promo labels" do
+    subject(:results) { parse("nissei_results_smartphone.html") }
 
     it "extracts every product with clean fields" do
-      expect(results.length).to eq(20)
+      expect(results.length).to eq(45)
       expect(results.first).to have_attributes(
-        title: "Placa Madre Asus Prime A620AM-K AM5 DDR5",
-        price: "Gs. 960.808",
-        availability: "in_stock",
-        url: "https://nissei.com/py/placa-madre-asus-prime-a620am-k-am5-ddr5",
+        title: "Montura para Smartphone QZSD - Negro",
+        price: "Gs. 18.000",
+        url: "https://nissei.com/py/montura-para-smartphone-qzsd-negro",
         position: 1
       )
       expect(results).to all(have_attributes(title: be_present, price: start_with("Gs. "), url: start_with("https://nissei.com/py/")))
+    end
+
+    it "flags a card labelled only \"Delivery Gratis\" as free-delivery, not online-only" do
+      expect(results.first).to have_attributes(online_only: false, free_delivery: true)
+    end
+
+    it "flags a card carrying both labels as online-only and free-delivery" do
+      expect(results[25]).to have_attributes(
+        title: "Electrificador de Cerca Wifi JFL Alarmes ECR 10W",
+        online_only: true,
+        free_delivery: true
+      )
+    end
+
+    it "flags a card with no label as neither" do
+      expect(results[1]).to have_attributes(
+        title: "Estabilizador Hohem iSteady V3 Ultra para Smartphone",
+        online_only: false,
+        free_delivery: false
+      )
+    end
+
+    it "reads the labels per card, not page-wide" do
+      expect(results.select(&:online_only).map(&:position)).to eq([26])
+      expect(results.reject(&:free_delivery).map(&:position)).to eq([2, 3, 4, 32, 42, 44])
     end
   end
 
@@ -70,10 +100,6 @@ RSpec.describe Scraper::NisseiParser do
       )
     end
 
-    it "reads availability from Magento's stock markers" do
-      expect(results.map(&:availability)).to eq(%w[in_stock out_of_stock])
-    end
-
     it "skips template cards that carry no product link" do
       expect(results.length).to eq(2)
     end
@@ -84,7 +110,7 @@ RSpec.describe Scraper::NisseiParser do
 
     it "still parses" do
       expect(results.map(&:title)).to include("PlayStation 5 Console")
-      expect(results.map(&:availability)).to eq(%w[in_stock in_stock out_of_stock])
+      expect(results).to all(have_attributes(online_only: false, free_delivery: false))
     end
   end
 

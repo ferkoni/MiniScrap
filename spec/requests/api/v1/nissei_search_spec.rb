@@ -42,7 +42,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     get "/api/v1/nissei/search", params: { q: "ps5" }
 
     first = response.parsed_body["results"].first
-    expect(first.keys).to contain_exactly("title", "price", "availability", "url", "position")
+    expect(first.keys).to contain_exactly("title", "price", "online_only", "free_delivery", "url", "position")
     expect(first).to include(
       "title" => "PlayStation 5 Console",
       "position" => 1
