@@ -20,7 +20,8 @@ GET /api/v1/nissei/search?q=ps5
                  "image_url": "https://nissei.com/media/catalog/product/…",
                  "position": 1 }, … ],
   "filters": { "categories": […], "brands": […], "colors": […] },
-  "browser_used": true, "latency_ms": 13893, "degraded": null }
+  "browser_used": true, "latency_ms": 13893,
+  "coverage": { "results[].price": { "present": 45, "of": 45 }, … }, "degraded": null }
 ```
 
 Search also returns `filters`: the sidebar's category tree, brands and colors, each option with
@@ -50,7 +51,8 @@ GET /api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&of
                  "price": "US$714", "taxes_note": "+ US$71 de impuestos y cargos",
                  "stay": "8 noches, 2 adultos", "image_url": "https://cf.bstatic.com/…",
                  "position": 5 }, … ],
-  "browser_used": false, "latency_ms": 1250, "degraded": null }
+  "browser_used": false, "latency_ms": 1250,
+  "coverage": { "results[].price": { "present": 15, "of": 15 }, … }, "degraded": null }
 ```
 
 - **Typed params, not a pasted URL.** The destination is `dest_id` + `dest_type`, or free-text
@@ -150,9 +152,8 @@ Making every caller a leader fails five of those specs.
 ## 5. Making the escalation observable
 
 One JSON response hides the process, so the payload reports it: `browser_used: true` with a high
-`latency_ms` is a cold start, and `false` with a low one is a cache hit. `degraded: "zero_results"`
-flags a cleared page that parsed to nothing, most likely a layout the parser no longer understands,
-so it can't pass for a genuinely empty search.
+`latency_ms` is a cold start, and `false` with a low one is a cache hit. `coverage` and `degraded`
+report whether the parse itself can be trusted (§7).
 
 To watch it as it happens, ask for a stream (`Accept: text/event-stream` or `?stream=true`):
 
@@ -181,7 +182,7 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 
 | To add… | You write… | Untouched |
 |---|---|---|
-| a site | a ~5-line controller subclass (`scrapes "…", base_url:, profile:, parser:`) + a route | flow, store |
+| a site | a ~5-line controller subclass (`scrapes "…", base_url:, profile:, parser:`, plus an optional coverage `contract:`) + a route | flow, store |
 | a protection (e.g. DataDome) | a detector returning `Challenge(:datadome)` + one registry entry | flow, controllers |
 | an endpoint | a one-line action building a path + a route | everything else |
 
@@ -199,11 +200,58 @@ or `fetch_failed`, and `504` for `solve_timeout`.
 The parser uses **layered selectors** (a primary selector with fallbacks for every field) and emits
 a source-agnostic shape. nissei's promo labels ("Solo Online", "Delivery Gratis") become
 `online_only` and `free_delivery` rather than nissei's wording: `true` when the card shows the
-label and `null` otherwise, never `false`, since the page never says a card lacks one. A hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks
-work. Checking the parser against the real page also caught a phantom result: a wishlist-sidebar
+label and `null` otherwise, never `false`, since the page never says a card lacks one. A
+hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks work.
+Checking the parser against the real page also caught a phantom result: a wishlist-sidebar
 template shared the product-card class.
 
-## 7. What I deliberately scoped out, and how I'd build it at scale
+## 7. Knowing when the parser broke
+
+Fallbacks keep the fields that identify a result alive through a redesign. Everything else used
+to fail silently. Renaming Booking's price hook left all 15 prices `null`; renaming nissei's
+filter hooks emptied the whole filter sidebar; renaming its card classes left all 13 home
+sections with no products. Each came back as an ordinary `200` with `degraded: null`: the API
+would have shipped broken data and nobody would have known until a client complained.
+
+Now every response is checked, and the check never looks at the page. It reads the JSON the API
+is about to return, against a small contract each endpoint declares as JSON paths:
+
+```ruby
+SEARCH_CONTRACT = Scraper::Coverage::Contract.new(
+  non_empty: %w[results],
+  required: %w[name url price address image_url].map { |field| "results[].#{field}" }
+)
+```
+
+- **`non_empty`:** the array or object has content. Under `[]` it applies to each element, so one
+  empty home section is named by its index (`results[3].products`). nissei's `filters` counts as
+  empty only when categories, brands and colors are all empty, since one empty group can be real.
+- **`required`:** the field has a value on at least one result. Missing on every result means a
+  selector broke; missing on some is data. The real home page has one product with no price, 172
+  of 173, and that must not be flagged.
+
+A broken selector then reads:
+
+```jsonc
+"coverage": { "results[].price": { "present": 0, "of": 15 }, … },
+"degraded": [ { "code": "missing_field", "path": "results[].price", "present": 0, "of": 15 } ]
+```
+
+`coverage` comes with every response, counting every field, so a drop in an optional field is at
+least visible. An empty page is just `non_empty: results` failing, the default for a site that
+declares nothing more. The status stays `200`: partial data, marked as partial.
+
+**What it can't see.** A field that can legitimately vanish from a whole page (reviews, stars,
+discounts, promo labels) can't be checked from one page: 0 discounts looks exactly like a page
+with no sales. The same goes for a home carousel that's absent rather than empty, which is
+correct for some visitors. Catching those needs rates across many searches, not one.
+
+Specs rename selectors in the real captured pages, the way a redesign would, and assert on the
+API body. For a required field, the rename either hits a fallback and gives the same output, or
+it's flagged. For an optional one, the spec pins the drop in `coverage`. Values also can't guess, or "missing" would mean nothing: a blank element is `null`, never `""`,
+and a label the card doesn't show is `null`, not `false`.
+
+## 8. What I deliberately scoped out, and how I'd build it at scale
 
 - **Multi-host deployment.** The Kamal setup (see *Deploying*) is **one host**, because
   FlareSolverr must share the app's egress IP. It runs one process by default, or several workers
@@ -357,7 +405,7 @@ Background refresh-ahead solves (XFetch) don't appear in any response. Look for
 | `502 {"error":"solve_failed"}` mentioning *Connection refused* | FlareSolverr isn't running, or isn't at `FLARESOLVERR_URL` |
 | `504 {"error":"solve_timeout"}` | FlareSolverr couldn't clear the challenge within 60s |
 | `502 {"error":"retry_budget_exhausted"}` | a fresh clearance was still challenged, usually because FlareSolverr's Chrome version and the curl-impersonate profile drifted too far apart (see §3) |
-| `200` with `"degraded":"zero_results"` | the page loaded but nothing parsed; the site's layout may have changed |
+| `200` with `"degraded":[…]` | the page loaded but the parse broke a coverage rule (e.g. `results` empty, or a field missing on every result); the site's layout may have changed (see §7) |
 
 ### Tests and checks
 
