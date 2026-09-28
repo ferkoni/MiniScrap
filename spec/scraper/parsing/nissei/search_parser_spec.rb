@@ -19,8 +19,8 @@ RSpec.describe Scraper::Nissei::SearchParser do
       expect(results.first).to have_attributes(
         title: "Juego PS5 Saros",
         price: "Gs. 520.000",
-        online_only: false,
-        free_delivery: false,
+        online_only: nil,
+        free_delivery: nil,
         url: "https://nissei.com/py/juego-ps5-saros",
         position: 1
       )
@@ -32,7 +32,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
 
     # This capture predates nissei's promo labels: no card carries one.
     it "flags no card as online-only or free-delivery" do
-      expect(results).to all(have_attributes(online_only: false, free_delivery: false))
+      expect(results).to all(have_attributes(online_only: nil, free_delivery: nil))
     end
 
     it "numbers positions 1-based in document order" do
@@ -74,7 +74,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
     end
 
     it "flags a card labelled only \"Delivery Gratis\" as free-delivery, not online-only" do
-      expect(results.first).to have_attributes(online_only: false, free_delivery: true)
+      expect(results.first).to have_attributes(online_only: nil, free_delivery: true)
     end
 
     it "flags a card carrying both labels as online-only and free-delivery" do
@@ -88,8 +88,8 @@ RSpec.describe Scraper::Nissei::SearchParser do
     it "flags a card with no label as neither" do
       expect(results[1]).to have_attributes(
         title: "Estabilizador Hohem iSteady V3 Ultra para Smartphone",
-        online_only: false,
-        free_delivery: false
+        online_only: nil,
+        free_delivery: nil
       )
     end
 
@@ -217,7 +217,7 @@ RSpec.describe Scraper::Nissei::SearchParser do
 
     it "still parses" do
       expect(results.map(&:title)).to include("PlayStation 5 Console")
-      expect(results).to all(have_attributes(online_only: false, free_delivery: false))
+      expect(results).to all(have_attributes(online_only: nil, free_delivery: nil))
     end
   end
 

@@ -30,9 +30,12 @@ module Scraper
       Nokogiri::XML::NodeSet.new(node.document, [])
     end
 
-    # Collapses runs of whitespace
+    # Collapses runs of whitespace. Blank text is nil, never "": an element
+    # that is present but empty holds no value, and a coverage check must be
+    # able to count it as missing.
     def squish(text)
-      text&.gsub(/[[:space:]]+/, " ")&.strip
+      squished = text&.gsub(/[[:space:]]+/, " ")&.strip
+      squished unless squished.nil? || squished.empty?
     end
   end
 end

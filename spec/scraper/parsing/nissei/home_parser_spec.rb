@@ -48,7 +48,7 @@ RSpec.describe Scraper::Nissei::HomeParser do
         price: "Gs. 2.390.000",
         old_price: "Gs. 2.990.000",
         discount: "-20%",
-        online_only: false,
+        online_only: nil,
         free_delivery: true,
         url: "https://nissei.com/py/tv-smart-led-crystal-samsung-un50u8000fg-50-4k-tizen-negro",
         image_url: "https://nissei.com/media/catalog/product/cache/c831b74073e8f93ee349897f877fc397/c/e/celer_image_8_-_2026-03-05t075254.337.jpg",
@@ -71,13 +71,13 @@ RSpec.describe Scraper::Nissei::HomeParser do
         price: "Gs. 65.000",
         old_price: "Gs. 85.000",
         discount: "-24%",
-        free_delivery: false
+        free_delivery: nil
       )
     end
 
     it "reads the promo labels per card" do
       expect(section("gift_ideas").products).to all(have_attributes(online_only: true))
-      expect(section("best_sellers").products).to all(have_attributes(online_only: false))
+      expect(section("best_sellers").products).to all(have_attributes(online_only: nil))
       expect(section("recommended").products).to all(have_attributes(free_delivery: true))
     end
 

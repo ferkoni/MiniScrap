@@ -15,7 +15,7 @@ GET /api/v1/nissei/search?q=ps5
 { "site": "nissei",
   "results": [ { "title": "Juego PS5 Saros", "price": "Gs. 520.000",
                  "old_price": null, "discount": null,
-                 "online_only": false, "free_delivery": false,
+                 "online_only": null, "free_delivery": null,
                  "url": "https://nissei.com/py/juego-ps5-saros",
                  "image_url": "https://nissei.com/media/catalog/product/…",
                  "position": 1 }, … ],
@@ -197,8 +197,9 @@ silently. Other failures map to honest statuses: `502` for `solve_failed`, `retr
 or `fetch_failed`, and `504` for `solve_timeout`.
 
 The parser uses **layered selectors** (a primary selector with fallbacks for every field) and emits
-a source-agnostic shape. nissei's promo labels ("Solo Online", "Delivery Gratis") become the
-booleans `online_only` and `free_delivery` rather than nissei's wording. A hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks
+a source-agnostic shape. nissei's promo labels ("Solo Online", "Delivery Gratis") become
+`online_only` and `free_delivery` rather than nissei's wording: `true` when the card shows the
+label and `null` otherwise, never `false`, since the page never says a card lacks one. A hand-made "layout-shifted" fixture renames every primary hook to prove the fallbacks
 work. Checking the parser against the real page also caught a phantom result: a wishlist-sidebar
 template shared the product-card class.
 

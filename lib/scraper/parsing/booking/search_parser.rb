@@ -100,14 +100,15 @@ module Scraper
       end
 
       # Booking's links carry a long tracking/session query (aid, label,
-      # srpvid, …); the property page itself is the path.
+      # srpvid, …); the property page itself is the path. An href that won't
+      # parse is nil rather than passed through with its tracking intact.
       def without_query(href)
         uri = URI.parse(href)
         uri.query = nil
         uri.fragment = nil
         uri.to_s
       rescue URI::InvalidURIError
-        href
+        nil
       end
     end
   end

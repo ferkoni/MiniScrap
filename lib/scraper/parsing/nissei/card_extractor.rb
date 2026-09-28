@@ -5,7 +5,8 @@ module Scraper
     # this. Fields come through layered selectors, primary first; a card
     # without a title and link is not a product (e.g. the wishlist sidebar's
     # Knockout template) and is skipped. Sale fields are nil when a card is
-    # not on sale.
+    # not on sale; a promo label is true when the card shows it and nil
+    # otherwise (never false: the page never says a card lacks one).
     class CardExtractor
       include Parser
 
@@ -40,8 +41,8 @@ module Scraper
           price: text(card, PRICE_SELECTORS),
           old_price: text(card, OLD_PRICE_SELECTORS),
           discount: text(card, DISCOUNT_SELECTORS),
-          online_only: labels.include?(ONLINE_ONLY),
-          free_delivery: labels.include?(FREE_DELIVERY),
+          online_only: labels.include?(ONLINE_ONLY) || nil,
+          free_delivery: labels.include?(FREE_DELIVERY) || nil,
           url: link["href"],
           image_url: lazy_first_selector_match(card, IMAGE_SELECTORS)&.[]("src")
         }
