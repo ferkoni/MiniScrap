@@ -31,7 +31,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
 
     expect(response).to have_http_status(:ok)
     body = response.parsed_body
-    expect(body.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "degraded")
+    expect(body.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "coverage", "degraded")
     expect(body["site"]).to eq("nissei")
     expect(body["browser_used"]).to be(false)
     expect(body["latency_ms"]).to be_a(Numeric)
@@ -51,11 +51,25 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     )
   end
 
-  # The synthetic page has no filter block, so the shape holds with empty lists.
-  it "always returns the filters shape, empty when the page offers none" do
+  it "reports how many results carry each field" do
     get "/api/v1/nissei/search", params: { q: "ps5" }
 
-    expect(response.parsed_body["filters"]).to eq("categories" => [], "brands" => [], "colors" => [])
+    coverage = response.parsed_body["coverage"]
+    expect(coverage["results"]).to eq("count" => 3, "present" => 1, "of" => 1)
+    expect(coverage["results[].price"]).to eq("present" => 3, "of" => 3)
+    expect(coverage["results[].discount"]).to eq("present" => 0, "of" => 3)
+  end
+
+  # A page with products and no filter sidebar has lost its filter selectors.
+  context "when the page offers no filter block" do
+    let(:html) { Rails.root.join("spec/fixtures/nissei/search.html").read.sub(/<div class="filter-content">.*?<\/div>/m, "") }
+
+    it "still returns the filters shape, empty, and flags it" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response.parsed_body["filters"]).to eq("categories" => [], "brands" => [], "colors" => [])
+      expect(response.parsed_body["degraded"]).to eq([{ "code" => "empty", "path" => "filters" }])
+    end
   end
 
   context "when the page has a filter block" do
@@ -134,11 +148,12 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
   context "when the page parses to zero products" do
     let(:responses) { [Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>")] }
 
-    it "returns 200 with empty results flagged degraded: zero_results" do
+    it "returns 200 with the empty results flagged" do
       get "/api/v1/nissei/search", params: { q: "ps5" }
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body).to include("results" => [], "degraded" => "zero_results")
+      expect(response.parsed_body).to include("results" => [])
+      expect(response.parsed_body["degraded"]).to include("code" => "empty", "path" => "results")
     end
   end
 
@@ -255,7 +270,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
       get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
       done = sse_events.last.last
 
-      expect(done.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "degraded")
+      expect(done.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "coverage", "degraded")
       expect(done).to include("site" => "nissei", "browser_used" => true)
       expect(done["results"].first).to include("title" => "PlayStation 5 Console", "position" => 1)
     end

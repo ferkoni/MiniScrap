@@ -32,8 +32,17 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
 
     expect(response).to have_http_status(:ok)
     body = response.parsed_body
-    expect(body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
+    expect(body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "coverage", "degraded")
     expect(body).to include("site" => "nissei", "browser_used" => false, "degraded" => nil)
+  end
+
+  # One product on the real page shows no price: data, not a broken selector.
+  it "checks the home contract, across every section's products" do
+    get "/api/v1/nissei/home"
+
+    body = response.parsed_body
+    expect(body["coverage"]["results[].products[].price"]).to eq("present" => 172, "of" => 173)
+    expect(body["degraded"]).to be_nil
   end
 
   it "parses with the home parser: results are sections of products" do
@@ -76,11 +85,11 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
   context "when the page parses to zero sections" do
     let(:responses) { [Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>")] }
 
-    it "returns 200 with empty results flagged degraded: zero_results" do
+    it "returns 200 with the empty results flagged" do
       get "/api/v1/nissei/home"
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body).to include("results" => [], "degraded" => "zero_results")
+      expect(response.parsed_body).to include("results" => [], "degraded" => [{ "code" => "empty", "path" => "results" }])
     end
   end
 

@@ -6,8 +6,8 @@ module Scraper
     #
     # Cards are read by CardExtractor, the same as on search, so every
     # section's Products have one shape. A missing carousel is dropped rather
-    # than returned empty; if nothing matches, the parse is empty and ScrapeFlow
-    # flags the result degraded: "zero_results".
+    # than returned empty. An empty parse, or a section left with no products,
+    # is flagged by the home Coverage::Contract.
     class HomeParser
       include Parser
 

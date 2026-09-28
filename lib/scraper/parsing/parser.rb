@@ -1,6 +1,7 @@
 module Scraper
   # Interface for turning a cleared HTML body into a list of records, each
-  # responding to #to_h (ScrapeFlow flags an empty list "zero_results").
+  # responding to #to_h (ScrapeFlow checks their output against the site's
+  # Coverage::Contract, which by default flags an empty list).
   #
   #   parse(html) -> [record]
   #   parse_page(html) -> ParsedPage   # what ScrapeFlow calls
@@ -8,7 +9,8 @@ module Scraper
   # parse_page wraps parse with no filters; a parser whose page also offers
   # search filters overrides it.
   #
-  # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (Sections). A parser is site-specific and owned by a Site.
+  # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (Sections),
+  # Booking::SearchParser (Properties). A parser is site-specific and owned by a Site.
   module Parser
     def parse(_html)
       raise NotImplementedError, "#{self.class} must implement #parse"

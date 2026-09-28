@@ -7,9 +7,9 @@ module Scraper
     #
     # Booking's class names are generated hashes, so its data-testid hooks are
     # the primary selectors, with structural fallbacks (ARIA roles, the title's
-    # <h3>) after them. A card without a title and link is skipped. If every
-    # card selector misses, the parse is empty and ScrapeFlow flags the result
-    # degraded: "zero_results".
+    # <h3>) after them. A card without a title and link is skipped. A selector
+    # that misses on every card leaves that field nil throughout, which the
+    # site's Coverage::Contract flags (as it does an empty parse).
     #
     # `offset` is the index of the first card on this page, so positions stay
     # absolute across pages: with offset 25, the first card is position 26.

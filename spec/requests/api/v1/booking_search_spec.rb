@@ -38,8 +38,16 @@ RSpec.describe "GET /api/v1/booking/search", type: :request do
     search
 
     expect(response).to have_http_status(:ok)
-    expect(response.parsed_body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "degraded")
+    expect(response.parsed_body.keys).to contain_exactly("site", "results", "browser_used", "latency_ms", "coverage", "degraded")
     expect(response.parsed_body).to include("site" => "booking", "browser_used" => false, "degraded" => nil)
+  end
+
+  it "reports how many properties carry each field" do
+    search
+
+    coverage = response.parsed_body["coverage"]
+    expect(coverage["results[].price"]).to eq("present" => 15, "of" => 15)
+    expect(coverage["results[].stars"]).to eq("present" => 12, "of" => 15)
   end
 
   it "shapes each result with the property-card fields" do
@@ -160,11 +168,11 @@ RSpec.describe "GET /api/v1/booking/search", type: :request do
   context "when the page parses to zero properties" do
     let(:responses) { [Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>")] }
 
-    it "returns 200 with empty results flagged degraded: zero_results" do
+    it "returns 200 with the empty results flagged" do
       search
 
       expect(response).to have_http_status(:ok)
-      expect(response.parsed_body).to include("results" => [], "degraded" => "zero_results")
+      expect(response.parsed_body).to include("results" => [], "degraded" => [{ "code" => "empty", "path" => "results" }])
     end
   end
 

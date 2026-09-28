@@ -5,8 +5,9 @@ module Scraper
     #
     # Everything is found through layered selectors — an ordered list, primary
     # first, broader fallbacks after — so a layout shift degrades gracefully
-    # instead of returning nothing. If every card selector misses, the parse is
-    # empty and ScrapeFlow flags the result degraded: "zero_results".
+    # instead of returning nothing. What still gets through (an empty parse, a
+    # field nil on every card, no filters at all) is flagged by the site's
+    # Coverage::Contract.
     #
     # parse_page also reads the sidebar's filter block (Amasty's layered
     # navigation) into Filters: the category tree, brands and colors, each
