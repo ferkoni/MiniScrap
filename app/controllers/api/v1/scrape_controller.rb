@@ -86,18 +86,11 @@ module Api
         render json: { error: "invalid_params", details: error.details }, status: :bad_request
       end
 
-      # Class-level DSL: declares the one Site this controller scrapes. `parser`
-      # and `contract` (what its output must meet, see Scraper::Coverage) are
-      # the defaults; an action whose page has another shape passes its own to
-      # `scrape`.
-      def self.scrapes(id, base_url:, profile:, parser:, contract: Scraper::Coverage::Contract::DEFAULT)
-        self.site = Scraper::Site.new(
-          id: id,
-          base_url: base_url,
-          profile: profile,
-          parser: parser,
-          contract: contract
-        )
+      # Class-level DSL: declares the one Site this controller scrapes, the
+      # identity every one of its endpoints shares (and so one clearance). How
+      # each page is read is per action: see `scrape`.
+      def self.scrapes(id, base_url:, profile:)
+        self.site = Scraper::Site.new(id: id, base_url: base_url, profile: profile)
       end
 
       private
@@ -105,19 +98,20 @@ module Api
       # Reusable edge helper: run the flow for a controller-built, site-relative
       # path and render the result — one JSON body by default, or a live event
       # stream when the client asks for one. Raised Scraper::Errors are mapped
-      # to status codes by the rescue_from above. `parser` and `contract`
-      # override the Site's defaults for this one page; the Site's id and
-      # profile — and so its cached clearance — are unchanged.
-      def scrape(path, parser: nil, contract: nil)
+      # to status codes by the rescue_from above. Each action names how its
+      # page is read: the `parser`, and the `contract` its output must meet
+      # (see Scraper::Coverage).
+      def scrape(path, parser:, contract:)
         return stream_scrape(path, parser: parser, contract: contract) if stream?
 
         render json: serialize(run_flow(path, parser: parser, contract: contract))
       end
 
-      def run_flow(path, parser: nil, contract: nil, events: Scraper::NullEventSink.new)
-        site = self.class.site.with(**{ parser: parser, contract: contract }.compact)
+      def run_flow(path, parser:, contract:, events: Scraper::NullEventSink.new)
         Scraper::ScrapeFlow.new(
-          site: site,
+          site: self.class.site,
+          parser: parser,
+          contract: contract,
           fetcher: fetcher,
           detector: Scraper::CompositeDetector.new(detectors),
           store: store,
@@ -135,7 +129,7 @@ module Api
       # carrying the same body as the JSON endpoint. Headers (and a 200) are
       # already sent by then, so a failure becomes a terminal `error` event
       # carrying the status the JSON endpoint would have used.
-      def stream_scrape(path, parser: nil, contract: nil)
+      def stream_scrape(path, parser:, contract:)
         response.headers["Content-Type"] = "text/event-stream"
         response.headers["Cache-Control"] = "no-cache"
         sink = Scraper::SseEventSink.new(response.stream)

@@ -215,9 +215,9 @@ The orchestrator names only interfaces and contains no `if site == …` or `if c
 
 | To add… | You write… | Untouched |
 |---|---|---|
-| a site | a ~5-line controller subclass (`scrapes "…", base_url:, profile:, parser:`, plus an optional coverage `contract:`) + a route | flow, store |
+| a site | a ~5-line controller subclass (`scrapes "…", base_url:, profile:`: the identity its clearance is bound to) + a route | flow, store |
 | a protection (e.g. DataDome) | a detector returning `Challenge(:datadome)` + one registry entry | flow, controllers |
-| an endpoint | a one-line action building a path + a route | everything else |
+| an endpoint | a one-line action: `scrape(path, parser:, contract:)` + a route. It shares the site's clearance | everything else |
 
 **Booking tested this table.** Adding it took a controller, a route, a parser, a detector and a
 registry entry, as the table says, with `ScrapeFlow` and `ClearanceStore` untouched. It also

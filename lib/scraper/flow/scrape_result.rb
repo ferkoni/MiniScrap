@@ -5,7 +5,7 @@ module Scraper
   # `data` is ParsedPage#data: the parser's output as the API renders it
   # (`results`, plus `filters` when the page offers them).
   # `coverage` counts, per JSON path of the output, how many items carry a
-  # value; `degraded` is nil when the site's Coverage::Contract holds, else
+  # value; `degraded` is nil when the endpoint's Coverage::Contract holds, else
   # the list of rules that failed (e.g. a field missing on every result: a
   # selector the page no longer matches, surfaced rather than returned as a
   # silent success). See Coverage::Check.

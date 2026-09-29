@@ -9,7 +9,7 @@ module Scraper
   # one; a challenge means that clearance (if any) is dead, so it is dropped
   # and a fresh one is resolved, up to `max_retries` times. The parsed output
   # is checked against
-  # the site's Coverage::Contract, so a cleared page the parser no longer
+  # the endpoint's Coverage::Contract, so a cleared page the parser no longer
   # understands comes back flagged in `degraded`, never as a silent success.
   #
   # Follow-ups are the background requests a parser declares for content the
@@ -21,8 +21,14 @@ module Scraper
   # Progress is narrated to an injected EventSink (fast_path, solving,
   # follow_up); the result is still returned.
   class ScrapeFlow
-    def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new, proxy: nil)
+    # `parser` reads this endpoint's page (and declares its follow-ups);
+    # `contract` is what its output must meet, by default only that it isn't
+    # empty.
+    def initialize(site:, parser:, fetcher:, detector:, store:, contract: Coverage::Contract::DEFAULT,
+                   max_retries: 1, events: NullEventSink.new, proxy: nil)
       @site = site
+      @parser = parser
+      @contract = contract
       @fetcher = fetcher
       @detector = detector
       @store = store
@@ -56,8 +62,8 @@ module Scraper
 
       bodies, failures = fetch_follow_ups(clearance)
       # Checked as the API renders it: the same data the controller renders.
-      data = @site.parser.parse_page(response.body, follow_ups: bodies).data
-      report = Coverage::Check.new(@site.contract).call(data)
+      data = @parser.parse_page(response.body, follow_ups: bodies).data
+      report = Coverage::Check.new(@contract).call(data)
       issues = failures + report.issues
       ScrapeResult.new(
         site: @site.id,
@@ -89,7 +95,7 @@ module Scraper
     def fetch_follow_ups(clearance)
       bodies = {}
       failures = []
-      @site.parser.follow_ups.each do |follow_up|
+      @parser.follow_ups.each do |follow_up|
         body, reason = fetch_follow_up(follow_up, clearance)
         bodies[follow_up.name] = body
         failures << { "code" => "follow_up_failed", "name" => follow_up.name.to_s, "reason" => reason } if reason

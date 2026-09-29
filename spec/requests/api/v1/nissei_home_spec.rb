@@ -127,7 +127,7 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
     end
   end
 
-  # The per-action parser must not leak into the Site the other actions use.
+  # Each action names its own parser: home's never reaches search.
   it "leaves search on the search parser" do
     get "/api/v1/nissei/home"
     allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(

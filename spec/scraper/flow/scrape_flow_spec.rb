@@ -17,18 +17,18 @@ RSpec.describe Scraper::ScrapeFlow do
   let(:store) { Scraper::ClearanceStore.new(registry: Scraper::SolverRegistry.new(cloudflare_js: solver), clock: clock) }
   let(:key) { Scraper::ClearanceKey.new(site_id: "nissei", profile: :chrome131) }
 
-  let(:site) do
-    Scraper::Site.new(
-      id: "nissei",
-      base_url: "https://nissei.com/py/",
-      profile: :chrome131,
-      parser: Scraper::Nissei::SearchParser.new
-    )
+  let(:site) { Scraper::Site.new(id: "nissei", base_url: "https://nissei.com/py/", profile: :chrome131) }
+  let(:parser) { Scraper::Nissei::SearchParser.new }
+  let(:contract) { Scraper::Coverage::Contract::DEFAULT }
+
+  # The flow as a controller builds it; specs override any collaborator.
+  def flow(**overrides)
+    described_class.new(site: site, parser: parser, contract: contract, fetcher: fetcher, detector: detector, store: store, **overrides)
   end
   let(:url) { "https://nissei.com/py/search?q=ps5" }
 
   def run_flow
-    described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
+    flow.run("search?q=ps5")
   end
 
   subject(:result) { run_flow }
@@ -92,14 +92,8 @@ RSpec.describe Scraper::ScrapeFlow do
     expect(result.coverage["filters.brands"]).to eq("count" => 1, "present" => 1, "of" => 1)
   end
 
-  context "with the site's own contract" do
-    let(:site) do
-      Scraper::Site.new(
-        id: "nissei", base_url: "https://nissei.com/py/", profile: :chrome131,
-        parser: Scraper::Nissei::SearchParser.new,
-        contract: Scraper::Coverage::Contract.new(non_empty: %w[results], required: %w[results[].discount])
-      )
-    end
+  context "with the endpoint's own contract" do
+    let(:contract) { Scraper::Coverage::Contract.new(non_empty: %w[results], required: %w[results[].discount]) }
 
     it "checks the output against it" do
       expect(result.degraded).to eq([{ "code" => "missing_field", "path" => "results[].discount", "present" => 0, "of" => 3 }])
@@ -142,7 +136,7 @@ RSpec.describe Scraper::ScrapeFlow do
         .with(url, ua: Scraper::StubSolver::UA, cookies: Scraper::StubSolver::COOKIES, headers: {})
         .and_call_original
 
-      warm = described_class.new(site: site, fetcher: warm_fetcher, detector: detector, store: store).run("search?q=ps5")
+      warm = flow(fetcher: warm_fetcher).run("search?q=ps5")
 
       expect(warm.browser_used).to be(false)
       expect(solver.calls).to eq(1)
@@ -154,7 +148,7 @@ RSpec.describe Scraper::ScrapeFlow do
       expect(expired_fetcher).to receive(:fetch).with(url, ua: nil, cookies: {}, headers: {}).ordered.and_call_original
       expect(expired_fetcher).to receive(:fetch).with(url, hash_including(ua: Scraper::StubSolver::UA)).ordered.and_call_original
 
-      expired = described_class.new(site: site, fetcher: expired_fetcher, detector: detector, store: store).run("search?q=ps5")
+      expired = flow(fetcher: expired_fetcher).run("search?q=ps5")
 
       expect(expired.browser_used).to be(true)
       expect(solver.calls).to eq(2)
@@ -173,7 +167,7 @@ RSpec.describe Scraper::ScrapeFlow do
       recovering = Scraper::FakeFetcher.new(responses: [challenged, cleared])
       expect(store).to receive(:invalidate).with(key, dead).and_call_original
 
-      recovered = described_class.new(site: site, fetcher: recovering, detector: detector, store: store).run("search?q=ps5")
+      recovered = flow(fetcher: recovering).run("search?q=ps5")
 
       expect(recovered.browser_used).to be(true)
       expect(solver.calls).to eq(2)
@@ -196,7 +190,7 @@ RSpec.describe Scraper::ScrapeFlow do
     end
 
     it "does not parse the challenge body" do
-      expect(site.parser).not_to receive(:parse)
+      expect(parser).not_to receive(:parse_page)
       expect { result }.to raise_error(Scraper::RetryBudgetExhausted)
     end
   end
@@ -212,7 +206,7 @@ RSpec.describe Scraper::ScrapeFlow do
     end
 
     it "does not parse the challenge body" do
-      expect(site.parser).not_to receive(:parse)
+      expect(parser).not_to receive(:parse_page)
       expect { result }.to raise_error(Scraper::UnsupportedChallenge)
     end
   end
@@ -254,7 +248,7 @@ RSpec.describe Scraper::ScrapeFlow do
     let(:events) { Scraper::RecordingEventSink.new }
 
     def run_with_events(fetcher)
-      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, events: events).run("search?q=ps5")
+      flow(fetcher: fetcher, events: events).run("search?q=ps5")
     end
 
     it "narrates a cold start as fast_path -> solving -> fast_path" do
@@ -292,7 +286,7 @@ RSpec.describe Scraper::ScrapeFlow do
     let(:solver) { Scraper::StubSolver.new(clock: clock, ttl: 1800) }
 
     def run_via(proxy, fetcher)
-      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, proxy: proxy).run("search?q=ps5")
+      flow(fetcher: fetcher, proxy: proxy).run("search?q=ps5")
     end
 
     it "fetches and solves through the request's proxy, caching under a proxy-specific key" do
@@ -338,13 +332,12 @@ RSpec.describe Scraper::ScrapeFlow do
         end
       end.new
     end
-    let(:site) { Scraper::Site.new(id: "nissei", base_url: "https://nissei.com/py/", profile: :chrome131, parser: parser) }
     let(:follow_up_url) { "https://nissei.com/py/ajax/extra?x=1" }
     let(:json) { Scraper::Response.new(status: 200, headers: {}, body: '{"ok":true}') }
     let(:events) { Scraper::RecordingEventSink.new }
 
     def run_with(fetcher, proxy: nil)
-      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, events: events, proxy: proxy)
+      flow(fetcher: fetcher, events: events, proxy: proxy)
         .run("search?q=ps5")
     end
 
@@ -402,9 +395,9 @@ RSpec.describe Scraper::ScrapeFlow do
     end
 
     it "reports the failure ahead of the contract's issues" do
-      site = self.site.with(contract: Scraper::Coverage::Contract.new(non_empty: %w[results absent]))
       fetcher = Scraper::FakeFetcher.new(responses: [cleared, Scraper::Response.new(status: 404, headers: {}, body: "")])
-      result = described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
+      contract = Scraper::Coverage::Contract.new(non_empty: %w[results absent])
+      result = flow(fetcher: fetcher, contract: contract).run("search?q=ps5")
 
       expect(result.degraded.pluck("code")).to eq(%w[follow_up_failed empty])
     end
@@ -412,7 +405,7 @@ RSpec.describe Scraper::ScrapeFlow do
 
   it "makes exactly one fetch for a parser with no follow-ups" do
     fetcher = Scraper::FakeFetcher.new(response: cleared)
-    described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
+    flow(fetcher: fetcher).run("search?q=ps5")
 
     expect(fetcher.requests.pluck(:url)).to eq([url])
   end
