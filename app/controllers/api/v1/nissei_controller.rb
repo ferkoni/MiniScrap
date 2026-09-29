@@ -16,12 +16,21 @@ module Api
         required: PRODUCT_FIELDS.map { |field| "results[].#{field}" }
       )
 
-      # Every section the parser finds must hold products. A carousel that is
-      # absent altogether can't be told from one this visitor wasn't shown, so
-      # it isn't checked here.
+      # Carousels every capture of the endpoint returned with products, so one
+      # missing is a break, not a visitor who wasn't shown it (2026-09-29
+      # browser captures; not yet confirmed through the fast path).
+      GUARANTEED_CAROUSELS = %w[recommended may_like continue_buying gift_ideas best_sellers].freeze
+
+      # Every showcase and every guaranteed carousel must hold products. A
+      # failed carousel request shows as follow_up_failed (why) plus one
+      # `empty` per guaranteed carousel (what's missing).
       HOME_CONTRACT = Scraper::Coverage::Contract.new(
-        non_empty: %w[results results[].products],
-        required: PRODUCT_FIELDS.map { |field| "results[].products[].#{field}" }
+        non_empty: %w[results results.categories results.categories[].products] +
+                   GUARANTEED_CAROUSELS.map { "results.carousels.#{_1}.products" },
+        required: PRODUCT_FIELDS.flat_map do |field|
+          ["results.categories[].products[].#{field}"] +
+            GUARANTEED_CAROUSELS.map { "results.carousels.#{_1}.products[].#{field}" }
+        end
       )
 
       scrapes "nissei",
@@ -36,6 +45,7 @@ module Api
       end
 
       # The home page is carousels and category showcases, not a result list.
+      # Two requests to nissei: the page, then the carousels' endpoint.
       HOME_PARSER = Scraper::Nissei::HomeParser.new
 
       def home

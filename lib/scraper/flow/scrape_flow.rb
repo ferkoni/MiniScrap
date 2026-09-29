@@ -4,14 +4,22 @@ module Scraper
   # Rails, JSON, or HTTP.
   #
   # fast fetch -> detect -> (on a challenge) resolve a clearance through the
-  # shared ClearanceStore -> bounded retry -> parse. The fast path always goes
-  # first, presenting a cached clearance when the store holds one; a challenge
-  # means that clearance (if any) is dead, so it is dropped and a fresh one is
-  # resolved, up to `max_retries` times. The parsed output is checked against
+  # shared ClearanceStore -> bounded retry -> follow-ups -> parse. The fast
+  # path always goes first, presenting a cached clearance when the store holds
+  # one; a challenge means that clearance (if any) is dead, so it is dropped
+  # and a fresh one is resolved, up to `max_retries` times. The parsed output
+  # is checked against
   # the site's Coverage::Contract, so a cleared page the parser no longer
   # understands comes back flagged in `degraded`, never as a silent success.
-  # Progress is narrated to an injected EventSink (fast_path, solving); the
-  # result is still returned.
+  #
+  # Follow-ups are the background requests a parser declares for content the
+  # page's scripts would load (Parser#follow_ups). They run after the cleared
+  # page, in order, one attempt each with the same clearance; a failed one is
+  # a `follow_up_failed` issue in `degraded` and a nil body for the parser,
+  # never a failed scrape: the page itself was fine.
+  #
+  # Progress is narrated to an injected EventSink (fast_path, solving,
+  # follow_up); the result is still returned.
   class ScrapeFlow
     def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new, proxy: nil)
       @site = site
@@ -46,19 +54,18 @@ module Scraper
         response = fetch(url, clearance, attempt: retries + 1)
       end
 
-      page = @site.parser.parse_page(response.body)
-      # Checked as the API renders it: the same #to_h the controller calls.
-      report = Coverage::Check.new(@site.contract).call(
-        { results: page.results.map(&:to_h), filters: page.filters&.to_h }.compact
-      )
+      bodies, failures = fetch_follow_ups(clearance)
+      # Checked as the API renders it: the same data the controller renders.
+      data = @site.parser.parse_page(response.body, follow_ups: bodies).data
+      report = Coverage::Check.new(@site.contract).call(data)
+      issues = failures + report.issues
       ScrapeResult.new(
         site: @site.id,
-        results: page.results,
-        filters: page.filters,
+        data: data,
         browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
         coverage: report.coverage,
-        degraded: (report.issues unless report.issues.empty?)
+        degraded: (issues unless issues.empty?)
       )
     end
 
@@ -75,6 +82,39 @@ module Scraper
         headers: clearance&.headers || {},
         **{ proxy: @proxy }.compact # no proxy: the plain call
       )
+    end
+
+    # Each follow-up's body by name (nil when it failed), and one issue per
+    # failure.
+    def fetch_follow_ups(clearance)
+      bodies = {}
+      failures = []
+      @site.parser.follow_ups.each do |follow_up|
+        body, reason = fetch_follow_up(follow_up, clearance)
+        bodies[follow_up.name] = body
+        failures << { "code" => "follow_up_failed", "name" => follow_up.name.to_s, "reason" => reason } if reason
+      end
+      [bodies, failures]
+    end
+
+    # One attempt, with the page's clearance, UA and proxy. A challenge is a
+    # failure, not solved, and the clearance is kept: the page fetch just
+    # proved it works.
+    def fetch_follow_up(follow_up, clearance)
+      @events.emit(:follow_up, name: follow_up.name)
+      response = @fetcher.fetch(
+        @site.url_for(follow_up.path),
+        ua: clearance&.ua,
+        cookies: clearance&.cookies || {},
+        headers: (clearance&.headers || {}).merge(follow_up.headers),
+        **{ proxy: @proxy }.compact
+      )
+      return [nil, "challenge"] if @detector.detect(response)
+      return [nil, "status #{response.status}"] unless (200..299).cover?(response.status)
+
+      [response.body, nil]
+    rescue FetchFailed
+      [nil, "fetch_failed"]
     end
 
     def monotonic_ms

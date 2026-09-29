@@ -154,30 +154,60 @@ RSpec.describe "Renamed selectors in real pages", type: :request do
 
   describe "nissei home" do
     let(:page) { fixture("nissei/home.html") }
-    let(:original) { scrape("/api/v1/nissei/home", page) }
+    let(:sections_json) { fixture("nissei/home_sections.json") }
+    let(:original) { home(page, sections_json) }
+    let(:carousel_keys) { %w[recommended may_like continue_buying gift_ideas best_sellers] }
 
-    def home(html) = scrape("/api/v1/nissei/home", html)
+    # The API body for `html` as the page and `json` as the carousel response.
+    def home(html, json)
+      fetcher = Scraper::FakeFetcher.new(responses: [html, json].map { Scraper::Response.new(status: 200, headers: {}, body: _1) })
+      allow(Scraper::CurlImpersonateFetcher).to receive(:new).and_return(fetcher)
+      get "/api/v1/nissei/home"
+      expect(response).to have_http_status(:ok)
+      response.parsed_body
+    end
 
     it "flags nothing on the page as captured" do
-      expect(original["results"].length).to eq(13)
+      expect(original["results"]["carousels"].values).to all(be_present)
+      expect(original["results"]["categories"].length).to eq(8)
       expect(original["degraded"]).to be_nil
     end
 
-    it "flags every section left without products when the card selectors are renamed" do
-      body = home(rename_classes(page, "product-item"))
+    it "flags every carousel and category left without products when the card selectors are renamed" do
+      data = JSON.parse(sections_json)
+      data["sections"].each { |section| section["html"] = rename_classes(section["html"], "product-item") }
+      body = home(rename_classes(page, "product-item"), data.to_json)
 
-      expect(body["results"].length).to eq(13)
-      expect(body["degraded"]).to eq((0...13).map { |index| { "code" => "empty", "path" => "results[#{index}].products" } })
+      expect(body["results"]["categories"].length).to eq(8)
+      expect(body["results"]["carousels"].values).to all(include("products" => []))
+      expect(body["degraded"]).to eq(
+        (0...8).map { |index| { "code" => "empty", "path" => "results.categories[#{index}].products" } } +
+          carousel_keys.map { |key| { "code" => "empty", "path" => "results.carousels.#{key}.products" } }
+      )
     end
 
-    # A documented limit (Coverage REQUIREMENTS §4): sections that vanish
-    # outright leave a well-formed list, and the carousels are legitimately
-    # absent for some visitors. The home restructure addresses it.
-    it "does not flag the category showcases disappearing" do
-      body = home(rename_classes(page, "block-main-product"))
+    # Was a documented limit (Coverage REQUIREMENTS §4): with sections in one
+    # flat list, the showcases could vanish and leave a well-formed result.
+    it "flags the category showcases disappearing" do
+      body = home(rename_classes(page, "block-main-product"), sections_json)
 
-      expect(body["results"].map { |section| section["name"] }).to eq(%w[recommended may_like continue_buying gift_ideas best_sellers])
-      expect(body["degraded"]).to be_nil
+      expect(body["results"]["categories"]).to eq([])
+      expect(body["degraded"]).to eq([{ "code" => "empty", "path" => "results.categories" }])
+    end
+
+    # A guaranteed carousel that nissei stops returning.
+    {
+      "recommended" => "ofertas_recomendadas", "may_like" => "you_may_like", "continue_buying" => "continua_comprando",
+      "gift_ideas" => "gift_ideas", "best_sellers" => "bestsellers"
+    }.each do |key, id|
+      it "flags #{key} when its section is missing from the carousel response" do
+        data = JSON.parse(sections_json)
+        data["sections"].reject! { |section| section["id"] == id }
+        body = home(page, data.to_json)
+
+        expect(body["results"]["carousels"][key]).to be_nil
+        expect(body["degraded"]).to eq([{ "code" => "empty", "path" => "results.carousels.#{key}.products" }])
+      end
     end
   end
 end
