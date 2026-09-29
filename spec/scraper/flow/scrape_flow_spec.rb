@@ -76,15 +76,34 @@ RSpec.describe Scraper::ScrapeFlow do
   context "when a clean page parses to zero products" do
     let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>") }
 
-    it "returns an empty result flagged degraded: zero_results" do
+    it "returns an empty result flagged by the default contract" do
       expect(result.results).to eq([])
-      expect(result.degraded).to eq("zero_results")
+      expect(result.degraded).to eq([{ "code" => "empty", "path" => "results" }])
       expect(solver.calls).to eq(0)
     end
   end
 
-  it "reports degraded: nil when products were found" do
+  it "reports degraded: nil, not an empty list, when the contract holds" do
     expect(result.degraded).to be_nil
+  end
+
+  it "reports coverage of the parsed output, filters included" do
+    expect(result.coverage["results"]).to eq("count" => 3, "present" => 1, "of" => 1)
+    expect(result.coverage["filters.brands"]).to eq("count" => 1, "present" => 1, "of" => 1)
+  end
+
+  context "with the site's own contract" do
+    let(:site) do
+      Scraper::Site.new(
+        id: "nissei", base_url: "https://nissei.com/py/", profile: :chrome131,
+        parser: Scraper::Nissei::SearchParser.new,
+        contract: Scraper::Coverage::Contract.new(non_empty: %w[results], required: %w[results[].discount])
+      )
+    end
+
+    it "checks the output against it" do
+      expect(result.degraded).to eq([{ "code" => "missing_field", "path" => "results[].discount", "present" => 0, "of" => 3 }])
+    end
   end
 
   # Scenario A: fast path challenged -> one solve -> retried fast path clears.

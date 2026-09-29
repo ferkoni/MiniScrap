@@ -7,12 +7,12 @@ module Scraper
   # shared ClearanceStore -> bounded retry -> parse. The fast path always goes
   # first, presenting a cached clearance when the store holds one; a challenge
   # means that clearance (if any) is dead, so it is dropped and a fresh one is
-  # resolved, up to `max_retries` times. A cleared page that parses to zero
-  # products comes back flagged degraded: "zero_results". Progress is narrated
-  # to an injected EventSink (fast_path, solving); the result is still returned.
+  # resolved, up to `max_retries` times. The parsed output is checked against
+  # the site's Coverage::Contract, so a cleared page the parser no longer
+  # understands comes back flagged in `degraded`, never as a silent success.
+  # Progress is narrated to an injected EventSink (fast_path, solving); the
+  # result is still returned.
   class ScrapeFlow
-    ZERO_RESULTS = "zero_results".freeze
-
     def initialize(site:, fetcher:, detector:, store:, max_retries: 1, events: NullEventSink.new, proxy: nil)
       @site = site
       @fetcher = fetcher
@@ -47,17 +47,18 @@ module Scraper
       end
 
       page = @site.parser.parse_page(response.body)
-      results = page.results
+      # Checked as the API renders it: the same #to_h the controller calls.
+      report = Coverage::Check.new(@site.contract).call(
+        { results: page.results.map(&:to_h), filters: page.filters&.to_h }.compact
+      )
       ScrapeResult.new(
         site: @site.id,
-        results: results,
+        results: page.results,
         filters: page.filters,
         browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
-        # A cleared page with nothing on it is a structural anomaly (most
-        # likely a layout the parser no longer understands), not a challenge:
-        # flag it rather than return a silent empty success.
-        degraded: (ZERO_RESULTS if results.empty?)
+        coverage: report.coverage,
+        degraded: (report.issues unless report.issues.empty?)
       )
     end
 

@@ -3,23 +3,37 @@
   SYNTHETIC fixture from the slice-1 walking skeleton — hand-written to mimic the
   shape of a nissei search results page (product cards in an <ol class="products">).
   Kept small for flow and request specs; the parser's real-markup coverage uses the
-  captured nissei_results.html.
+  captured results.html. It carries what a healthy page always has (an image per
+  card, a filter sidebar), so it meets the coverage contract.
 -->
 <html lang="es">
 <head><title>Resultados de búsqueda: ps5</title></head>
 <body>
+  <div class="filter-content">
+    <form data-amshopby-filter="marca">
+      <ul class="items">
+        <li class="item" data-label="Sony">
+          <a href="https://nissei.com/py/catalogsearch/result/index/?marca=2119&amp;q=ps5">Sony</a>
+          <input type="checkbox" value="2119">
+        </li>
+      </ul>
+    </form>
+  </div>
   <ol class="products list items product-items">
     <li class="item product product-item">
+      <img class="product-image-photo" src="https://nissei.com/media/catalog/product/ps5-console.jpg" alt="">
       <a class="product-item-link" href="https://nissei.com/py/product/ps5-console">PlayStation 5 Console</a>
       <span class="price">Gs. 4.500.000</span>
       <div class="stock available">En stock</div>
     </li>
     <li class="item product product-item">
+      <img class="product-image-photo" src="https://nissei.com/media/catalog/product/ps5-dualsense.jpg" alt="">
       <a class="product-item-link" href="https://nissei.com/py/product/ps5-dualsense">DualSense Wireless Controller</a>
       <span class="price">Gs. 550.000</span>
       <div class="stock available">En stock</div>
     </li>
     <li class="item product product-item">
+      <img class="product-image-photo" src="https://nissei.com/media/catalog/product/ps5-spiderman.jpg" alt="">
       <a class="product-item-link" href="https://nissei.com/py/product/ps5-spiderman">Marvel's Spider-Man 2 (PS5)</a>
       <span class="price">Gs. 420.000</span>
       <div class="stock unavailable">Agotado</div>

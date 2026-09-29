@@ -35,11 +35,11 @@ RSpec.describe Scraper::Nissei::CardExtractor do
     )
   end
 
-  it "leaves sale fields nil and flags false on a plain card" do
+  it "leaves sale fields and promo labels nil on a plain card" do
     card = '<a class="product-item-link" href="https://nissei.com/py/x">X</a><span class="price">Gs. 1.000</span>'
 
     expect(products(card).first).to have_attributes(
-      price: "Gs. 1.000", old_price: nil, discount: nil, image_url: nil, online_only: false, free_delivery: false
+      price: "Gs. 1.000", old_price: nil, discount: nil, image_url: nil, online_only: nil, free_delivery: nil
     )
   end
 
@@ -57,7 +57,7 @@ RSpec.describe Scraper::Nissei::CardExtractor do
       <div class="amlabel-text">Solo Online Hoy</div>
     HTML
 
-    expect(products(card).first).to have_attributes(online_only: false, free_delivery: false)
+    expect(products(card).first).to have_attributes(online_only: nil, free_delivery: nil)
   end
 
   it "skips cards without a title or link, numbering the rest 1-based" do

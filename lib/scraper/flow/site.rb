@@ -2,9 +2,13 @@ require "uri"
 
 module Scraper
   # Immutable bundle of one target's config: id, base URL, curl-impersonate
-  # profile, and its Parser. Built once (at class load) by a per-site controller
-  # via the `scrapes` DSL and injected into ScrapeFlow, which stays site-agnostic.
-  Site = Data.define(:id, :base_url, :profile, :parser) do
+  # profile, its Parser, and the Coverage::Contract its output must meet (by
+  # default, only that it isn't empty). Built once (at class load) by a
+  # per-site controller via the `scrapes` DSL and injected into ScrapeFlow,
+  # which stays site-agnostic.
+  Site = Data.define(:id, :base_url, :profile, :parser, :contract) do
+    def initialize(id:, base_url:, profile:, parser:, contract: Coverage::Contract::DEFAULT) = super
+
     # Join a controller-built, site-relative path onto base_url, e.g.
     # url_for("search?q=ps5") -> "https://nissei.com/py/search?q=ps5".
     #

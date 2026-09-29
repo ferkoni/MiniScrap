@@ -8,10 +8,19 @@ module Api
     #
     # Booking sits behind AWS WAF, hence the extra detector.
     class BookingController < ScrapeController
+      # What every property must carry somewhere on a page (Scraper::Coverage):
+      # missing on all of them means a selector broke. Reviews (new hotels have
+      # none), stars, distance, taxes and stay can be absent, so they aren't here.
+      SEARCH_CONTRACT = Scraper::Coverage::Contract.new(
+        non_empty: %w[results],
+        required: %w[name url price address image_url].map { |field| "results[].#{field}" }
+      )
+
       scrapes "booking",
         base_url: "https://www.booking.com/",
         profile: :chrome146, # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
-        parser: Scraper::Booking::SearchParser.new
+        parser: Scraper::Booking::SearchParser.new,
+        contract: SEARCH_CONTRACT
 
       # Prices follow the egress IP's location unless a currency is pinned.
       CURRENCY = "USD".freeze

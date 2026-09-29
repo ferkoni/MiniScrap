@@ -99,6 +99,18 @@ RSpec.describe Scraper::Booking::SearchParser do
     end
   end
 
+  # Passing the raw href through would forward Booking's tracking query.
+  it "leaves url nil for an href that won't parse" do
+    card = <<~HTML
+      <div data-testid="property-card">
+        <div data-testid="title">Hotel</div>
+        <a data-testid="title-link" href="https://www.booking.com/hotel/py/a b.html?aid=1&label=x">Hotel</a>
+      </div>
+    HTML
+
+    expect(described_class.new.parse(card).first).to have_attributes(name: "Hotel", url: nil)
+  end
+
   # The challenge page parses to nothing; the detector, not the parser, must catch it.
   it "returns an empty list for the AWS WAF challenge page" do
     expect(parse("challenge.html")).to eq([])
