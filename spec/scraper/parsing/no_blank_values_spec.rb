@@ -31,6 +31,14 @@ RSpec.describe "Parsed values are never blank strings" do
     end
   end
 
+  it "HomeParser on nissei/home.html with its carousel response" do
+    data = Scraper::Nissei::HomeParser.new
+      .parse_page(fixture("nissei/home.html"), follow_ups: { carousels: fixture("nissei/home_sections.json") }).data
+
+    expect(data[:results][:carousels].values).to all(be_present)
+    expect(strings(data)).to all(satisfy { |s| !s.strip.empty? })
+  end
+
   it "squish turns blank and whitespace-only text into nil" do
     parser = Class.new { include Scraper::Parser }.new
 

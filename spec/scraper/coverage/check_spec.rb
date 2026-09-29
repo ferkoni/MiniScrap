@@ -148,13 +148,16 @@ RSpec.describe Scraper::Coverage::Check do
     expect(report.issues).to eq([{ "code" => "empty", "path" => "results" }])
   end
 
-  # The one real partial case: a home product the page shows without a price.
-  it "accepts the real home page, where one product in 173 has no price" do
-    sections = Scraper::Nissei::HomeParser.new.parse(Rails.root.join("spec/fixtures/nissei/home.html").read)
-    fields = %w[title url price image_url].map { |field| "results[].products[].#{field}" }
-    report = check({ results: sections.map(&:to_h) }, non_empty: %w[results results[].products], required: fields)
+  # The real home page and carousel response, under the contract /home declares.
+  it "accepts the real home page and its carousels under the home contract" do
+    fixtures = Rails.root.join("spec/fixtures/nissei")
+    data = Scraper::Nissei::HomeParser.new.parse_page(
+      fixtures.join("home.html").read, follow_ups: { carousels: fixtures.join("home_sections.json").read }
+    ).data
+    report = described_class.new(Api::V1::NisseiController::HOME_CONTRACT).call(data)
 
-    expect(report.coverage["results[].products[].price"]).to eq("present" => 172, "of" => 173)
+    expect(report.coverage["results.categories[].products[].price"]).to eq("present" => 116, "of" => 116)
+    expect(report.coverage["results.carousels.recommended.products[].discount"]).to eq("present" => 10, "of" => 10)
     expect(report.issues).to eq([])
   end
 end

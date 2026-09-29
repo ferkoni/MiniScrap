@@ -1,9 +1,10 @@
 module Scraper
-  # Interface for turning a cleared HTML body into a list of records, each
-  # responding to #to_h (ScrapeFlow checks their output against the site's
-  # Coverage::Contract, which by default flags an empty list).
+  # Interface for turning a cleared HTML body into a list of records, or one
+  # record for a page that isn't a list, each responding to #to_h (ScrapeFlow
+  # checks their output against the site's Coverage::Contract, which by
+  # default flags an empty list).
   #
-  #   parse(html) -> [record]
+  #   parse(html) -> [record] | record
   #   follow_ups -> [FollowUp]                      # fetched after the page
   #   parse_page(html, follow_ups:) -> ParsedPage   # what ScrapeFlow calls
   #
@@ -12,7 +13,7 @@ module Scraper
   # declared FollowUp#name to its response body, or nil when that request
   # failed; parsers that declare none ignore it.
   #
-  # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (Sections),
+  # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (a Home),
   # Booking::SearchParser (Properties). A parser is site-specific and owned by a Site.
   module Parser
     def parse(_html)
