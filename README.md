@@ -27,10 +27,41 @@ GET /api/v1/nissei/search?q=ps5
 Search also returns `filters`: the sidebar's category tree, brands and colors, each option with
 nissei's filter id (`value`) and the `url` that applies it.
 
-`GET /api/v1/nissei/home` returns the same envelope (without `filters`), but each result is a section of the home page
-(`recommended`, `may_like`, `continue_buying`, `gift_ideas`, `best_sellers`, then one `category`
-per showcase), each holding products in the same shape as search's: both pages render the same
-card, read by one shared `Nissei::CardExtractor`. It shares search's clearance, so it never pays its own solve.
+`GET /api/v1/nissei/home` returns the same envelope (without `filters`), but `results` is the home
+page's parts, each addressed by a stable key rather than found by searching a list:
+
+```jsonc
+{ "site": "nissei",
+  "results": {
+    "carousels": {
+      "recommended":     { "title": "Precios especiales en tus categorías top", "fallback": false, "products": [ … ] },
+      "may_like":        { "title": "Tus próximas compras favoritas", "fallback": false, "products": [ … ] },
+      "continue_buying": { … },
+      "gift_ideas":      null,                         // not returned this time
+      "best_sellers":    { … } },
+    "categories": [
+      { "title": "Fotografía y Filmación", "url": "https://nissei.com/py/fotografia-filmacion", "products": [ … ] },
+      … ] },
+  "browser_used": false, "latency_ms": …,             // both requests
+  "coverage": { … }, "degraded": null }
+```
+
+- **`carousels` always has all five keys.** One nissei didn't return is `null`, so the shape is
+  the same on every request. `fallback` is nissei's own `is_fallback` flag, passed through.
+- **`categories`** are the page's showcases, in page order. `url` is the category page the
+  showcase's heading links to: a category's one identifier that isn't page text.
+- **Products** have the same shape as search's: both pages render the same card, read by one
+  shared `Nissei::CardExtractor`.
+
+**`/home` makes two requests to nissei.** The carousels aren't in the page's HTML: its script
+loads them from nissei's own `aipersonalization/ajax/sections` endpoint. So after the page,
+`HomeParser` declares that request as a *follow-up*, and the flow makes it over the same fast
+path, with the same clearance, UA and proxy (no browser). `latency_ms` covers both. If the
+follow-up fails (a network error, a non-2xx, or a challenge, which isn't solved for an optional
+part), `/home` still returns `200` with the categories, every carousel `null`, and why in
+`degraded`: `{ "code": "follow_up_failed", "name": "carousels", "reason": "status 500" }`, next to
+one `empty` issue per missing carousel. Home shares search's clearance, so it never pays its own
+solve.
 
 Measured against the live site: the **first** request pays one browser solve (~14s, `browser_used:
 true`). **Every request after that** reuses the result over plain HTTP (~3s, `browser_used: false`).
@@ -164,6 +195,8 @@ To watch it as it happens, ask for a stream (`Accept: text/event-stream` or `?st
 +15.3s  event: done       { …the same body as the JSON endpoint… }
 ```
 
+`/home` adds a `follow_up {"name":"carousels"}` event before `done`, for its second request.
+
 The streaming variant was added **without touching the core**. `ScrapeFlow` narrates to an injected
 `EventSink` and still *returns* its result; only the edge decides whether that becomes one JSON body
 or a stream.
@@ -224,10 +257,11 @@ SEARCH_CONTRACT = Scraper::Coverage::Contract.new(
 ```
 
 - **`non_empty`:** the array or object has content. Under `[]` it applies to each element, so one
-  empty home section is named by its index (`results[3].products`). nissei's `filters` counts as
-  empty only when categories, brands and colors are all empty, since one empty group can be real.
+  empty home category is named by its index (`results.categories[3].products`). nissei's
+  `filters` counts as empty only when categories, brands and colors are all empty, since one
+  empty group can be real.
 - **`required`:** the field has a value on at least one result. Missing on every result means a
-  selector broke; missing on some is data. The real home page has one product with no price, 172
+  selector broke; missing on some is data. A real home page showed one product with no price, 172
   of 173, and that must not be flagged.
 
 A broken selector then reads:
@@ -243,8 +277,10 @@ declares nothing more. The status stays `200`: partial data, marked as partial.
 
 **What it can't see.** A field that can legitimately vanish from a whole page (reviews, stars,
 discounts, promo labels) can't be checked from one page: 0 discounts looks exactly like a page
-with no sales. The same goes for a home carousel that's absent rather than empty, which is
-correct for some visitors. Catching those needs rates across many searches, not one.
+with no sales. Catching those needs rates across many searches, not one. (Home carousels used
+to be in this list, when they came back as a flat list of sections. Now each has a fixed key, so
+a missing one is flagged as `empty results.carousels.<name>.products`, and so is the page
+losing its category showcases.)
 
 Specs rename selectors in the real captured pages, the way a redesign would, and assert on the
 API body. For a required field, the rename either hits a fallback and gives the same output, or
@@ -373,7 +409,7 @@ bin/dev                     # = bin/rails server, on http://localhost:3000 (PORT
 ```bash
 curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
 curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events (-N: don't buffer)
-curl 'localhost:3000/api/v1/nissei/home'                         # home page carousels + category showcases
+curl 'localhost:3000/api/v1/nissei/home'                         # home carousels + category showcases (2 requests to nissei)
 curl 'localhost:3000/api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&adults=2'
 curl 'localhost:3000/up'                                         # health check
 ```
