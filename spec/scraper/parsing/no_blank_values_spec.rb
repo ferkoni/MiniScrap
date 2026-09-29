@@ -24,8 +24,7 @@ RSpec.describe "Parsed values are never blank strings" do
   }.each do |parser, fixtures|
     fixtures.each do |path|
       it "#{parser.class.name.demodulize} on #{path}" do
-        page = parser.parse_page(fixture(path))
-        data = { results: page.results.map(&:to_h), filters: page.filters&.to_h }
+        data = parser.parse_page(fixture(path)).data
 
         expect(strings(data)).to all(satisfy { |s| !s.strip.empty? })
       end

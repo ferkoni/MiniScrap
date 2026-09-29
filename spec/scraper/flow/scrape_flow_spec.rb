@@ -45,11 +45,11 @@ RSpec.describe Scraper::ScrapeFlow do
     end
 
     it "parses the fetched body through the site's parser" do
-      expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+      expect(result.data[:results].pluck(:title)).to include("PlayStation 5 Console")
     end
 
     it "carries the parser's filters alongside the results" do
-      expect(result.filters).to be_a(Scraper::Nissei::SearchParser::Filters)
+      expect(result.data[:filters].keys).to contain_exactly(:categories, :brands, :colors)
     end
 
     it "offers the store a chance to refresh ahead on every read" do
@@ -77,7 +77,7 @@ RSpec.describe Scraper::ScrapeFlow do
     let(:cleared) { Scraper::Response.new(status: 200, headers: {}, body: "<html><body>redesigned</body></html>") }
 
     it "returns an empty result flagged by the default contract" do
-      expect(result.results).to eq([])
+      expect(result.data).to eq(results: [], filters: { categories: [], brands: [], colors: [] })
       expect(result.degraded).to eq([{ "code" => "empty", "path" => "results" }])
       expect(solver.calls).to eq(0)
     end
@@ -112,7 +112,7 @@ RSpec.describe Scraper::ScrapeFlow do
 
     it "solves exactly once and returns the parsed results with browser_used: true" do
       expect(result.browser_used).to be(true)
-      expect(result.results.map(&:title)).to include("PlayStation 5 Console")
+      expect(result.data[:results].pluck(:title)).to include("PlayStation 5 Console")
       expect(solver.calls).to eq(1)
     end
 
@@ -243,7 +243,7 @@ RSpec.describe Scraper::ScrapeFlow do
       gated.release
 
       results = threads.map(&:value)
-      expect(results).to all(have_attributes(browser_used: true, results: be_present))
+      expect(results).to all(have_attributes(browser_used: true, data: include(results: be_present)))
       expect(gated.calls).to eq(1)
     end
   end

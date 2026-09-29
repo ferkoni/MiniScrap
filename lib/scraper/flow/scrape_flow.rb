@@ -46,15 +46,12 @@ module Scraper
         response = fetch(url, clearance, attempt: retries + 1)
       end
 
-      page = @site.parser.parse_page(response.body)
-      # Checked as the API renders it: the same #to_h the controller calls.
-      report = Coverage::Check.new(@site.contract).call(
-        { results: page.results.map(&:to_h), filters: page.filters&.to_h }.compact
-      )
+      # Checked as the API renders it: the same data the controller renders.
+      data = @site.parser.parse_page(response.body).data
+      report = Coverage::Check.new(@site.contract).call(data)
       ScrapeResult.new(
         site: @site.id,
-        results: page.results,
-        filters: page.filters,
+        data: data,
         browser_used: browser_used,
         latency_ms: (monotonic_ms - started).round,
         coverage: report.coverage,
