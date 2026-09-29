@@ -33,20 +33,21 @@ module Api
         end
       )
 
+      # Both endpoints share this Site, and so one clearance: home never pays
+      # its own solve.
       scrapes "nissei",
         base_url: "https://nissei.com/py/",
-        profile: :chrome146, # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
-        parser: Scraper::Nissei::SearchParser.new,
-        contract: SEARCH_CONTRACT
+        profile: :chrome146 # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
 
-      # nissei runs Magento: its search lives at catalogsearch/result.
-      def search
-        scrape("catalogsearch/result/?q=#{CGI.escape(params[:q].to_s)}")
-      end
-
+      SEARCH_PARSER = Scraper::Nissei::SearchParser.new
       # The home page is carousels and category showcases, not a result list.
       # Two requests to nissei: the page, then the carousels' endpoint.
       HOME_PARSER = Scraper::Nissei::HomeParser.new
+
+      # nissei runs Magento: its search lives at catalogsearch/result.
+      def search
+        scrape("catalogsearch/result/?q=#{CGI.escape(params[:q].to_s)}", parser: SEARCH_PARSER, contract: SEARCH_CONTRACT)
+      end
 
       def home
         scrape("", parser: HOME_PARSER, contract: HOME_CONTRACT)

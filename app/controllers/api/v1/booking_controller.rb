@@ -18,9 +18,7 @@ module Api
 
       scrapes "booking",
         base_url: "https://www.booking.com/",
-        profile: :chrome146, # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
-        parser: Scraper::Booking::SearchParser.new,
-        contract: SEARCH_CONTRACT
+        profile: :chrome146 # closest to FlareSolverr's Chromium (see FlareSolverrSolver)
 
       # Prices follow the egress IP's location unless a currency is pinned.
       CURRENCY = "USD".freeze
@@ -34,11 +32,15 @@ module Api
 
       # GET /api/v1/booking/search?dest_id=-910015&dest_type=city&checkin=…&checkout=…&adults=2
       # GET /api/v1/booking/search?ss=Asuncion&checkin=…&checkout=…&offset=25
+      #
+      # A parser per request: positions are absolute across pages, so it
+      # needs the offset.
       def search
         query = search_query
         scrape(
           "searchresults.es.html?#{URI.encode_www_form(query)}",
-          parser: Scraper::Booking::SearchParser.new(offset: query[:offset])
+          parser: Scraper::Booking::SearchParser.new(offset: query[:offset]),
+          contract: SEARCH_CONTRACT
         )
       end
 

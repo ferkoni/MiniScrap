@@ -1,14 +1,14 @@
 require "uri"
 
 module Scraper
-  # Immutable bundle of one target's config: id, base URL, curl-impersonate
-  # profile, its Parser, and the Coverage::Contract its output must meet (by
-  # default, only that it isn't empty). Built once (at class load) by a
-  # per-site controller via the `scrapes` DSL and injected into ScrapeFlow,
-  # which stays site-agnostic.
-  Site = Data.define(:id, :base_url, :profile, :parser, :contract) do
-    def initialize(id:, base_url:, profile:, parser:, contract: Coverage::Contract::DEFAULT) = super
-
+  # Immutable bundle of one target's identity: id, base URL and
+  # curl-impersonate profile, which together with the proxy are what a
+  # clearance is bound to (see ClearanceKey). Every endpoint of a site shares
+  # it, and so shares one clearance. How a page is read (its Parser and
+  # Coverage::Contract) belongs to the endpoint, not the site. Built once (at
+  # class load) by a per-site controller via the `scrapes` DSL and injected
+  # into ScrapeFlow, which stays site-agnostic.
+  Site = Data.define(:id, :base_url, :profile) do
     # Join a controller-built, site-relative path onto base_url, e.g.
     # url_for("search?q=ps5") -> "https://nissei.com/py/search?q=ps5".
     #
