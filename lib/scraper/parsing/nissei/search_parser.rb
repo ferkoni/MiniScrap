@@ -49,7 +49,7 @@ module Scraper
         products(Nokogiri::HTML5(html))
       end
 
-      def parse_page(html)
+      def parse_page(html, follow_ups: {})
         doc = Nokogiri::HTML5(html)
         ParsedPage.new(results: products(doc), filters: filters(doc))
       end

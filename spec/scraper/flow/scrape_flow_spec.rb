@@ -317,4 +317,103 @@ RSpec.describe Scraper::ScrapeFlow do
       expect(solver.calls).to eq(2)
     end
   end
+
+  # A parser can declare background requests its page's scripts would make.
+  # The flow fetches them after the page, with the page's clearance, and hands
+  # their bodies back; a failed one never fails the scrape.
+  describe "follow-ups" do
+    let(:follow_up) { Scraper::FollowUp.new(name: :extra, path: "ajax/extra?x=1", headers: { "X-Requested-With" => "XMLHttpRequest" }) }
+    let(:parser) do
+      follow_ups = [follow_up]
+      Class.new do
+        include Scraper::Parser
+
+        attr_reader :received
+
+        define_method(:follow_ups) { follow_ups }
+
+        def parse_page(html, follow_ups: {})
+          @received = follow_ups
+          Scraper::ParsedPage.new(results: [{ page: html.to_s[0, 4] }], filters: nil)
+        end
+      end.new
+    end
+    let(:site) { Scraper::Site.new(id: "nissei", base_url: "https://nissei.com/py/", profile: :chrome131, parser: parser) }
+    let(:follow_up_url) { "https://nissei.com/py/ajax/extra?x=1" }
+    let(:json) { Scraper::Response.new(status: 200, headers: {}, body: '{"ok":true}') }
+    let(:events) { Scraper::RecordingEventSink.new }
+
+    def run_with(fetcher, proxy: nil)
+      described_class.new(site: site, fetcher: fetcher, detector: detector, store: store, events: events, proxy: proxy)
+        .run("search?q=ps5")
+    end
+
+    it "fetches each follow-up after the page and hands its body to parse_page by name" do
+      fetcher = Scraper::FakeFetcher.new(responses: [cleared, json])
+      result = run_with(fetcher)
+
+      expect(fetcher.requests.pluck(:url)).to eq([url, follow_up_url])
+      expect(parser.received).to eq(extra: '{"ok":true}')
+      expect(result.degraded).to be_nil
+    end
+
+    it "sends the page's clearance, UA and proxy, plus the follow-up's own headers" do
+      fetcher = Scraper::FakeFetcher.new(responses: [challenged, cleared, json])
+      run_with(fetcher, proxy: "http://a:1")
+
+      expect(fetcher.requests.last).to eq(
+        url: follow_up_url,
+        ua: Scraper::StubSolver::UA,
+        cookies: Scraper::StubSolver::COOKIES,
+        headers: { "X-Requested-With" => "XMLHttpRequest" },
+        proxy: "http://a:1"
+      )
+    end
+
+    it "narrates the follow-up between the fast path and the end" do
+      run_with(Scraper::FakeFetcher.new(responses: [cleared, json]))
+
+      expect(events.events).to eq([[:fast_path, { attempt: 1, clearance: false }], [:follow_up, { name: :extra }]])
+    end
+
+    {
+      "a challenge" => [Scraper::Response.new(status: 403, headers: {}, body: "Just a moment..."), "challenge"],
+      "a 500" => [Scraper::Response.new(status: 500, headers: {}, body: "oops"), "status 500"],
+      "a FetchFailed" => [Scraper::FetchFailed.new("timeout"), "fetch_failed"]
+    }.each do |failure, (response, reason)|
+      context "when the follow-up gets #{failure}" do
+        let(:fetcher) { Scraper::FakeFetcher.new(responses: [challenged, cleared, response]) }
+
+        it "gives the parser nil for it and reports follow_up_failed, still returning the page" do
+          result = run_with(fetcher)
+
+          expect(parser.received).to eq(extra: nil)
+          expect(result.data).to eq(results: [{ page: "<!DO" }])
+          expect(result.degraded).to eq([{ "code" => "follow_up_failed", "name" => "extra", "reason" => reason }])
+        end
+
+        it "neither solves nor drops the page's clearance" do
+          run_with(fetcher)
+
+          expect(solver.calls).to eq(1)
+          expect(store.peek(key)).to be_a(Scraper::Clearance)
+        end
+      end
+    end
+
+    it "reports the failure ahead of the contract's issues" do
+      site = self.site.with(contract: Scraper::Coverage::Contract.new(non_empty: %w[results absent]))
+      fetcher = Scraper::FakeFetcher.new(responses: [cleared, Scraper::Response.new(status: 404, headers: {}, body: "")])
+      result = described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
+
+      expect(result.degraded.pluck("code")).to eq(%w[follow_up_failed empty])
+    end
+  end
+
+  it "makes exactly one fetch for a parser with no follow-ups" do
+    fetcher = Scraper::FakeFetcher.new(response: cleared)
+    described_class.new(site: site, fetcher: fetcher, detector: detector, store: store).run("search?q=ps5")
+
+    expect(fetcher.requests.pluck(:url)).to eq([url])
+  end
 end

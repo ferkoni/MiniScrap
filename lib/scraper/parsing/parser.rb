@@ -4,10 +4,13 @@ module Scraper
   # Coverage::Contract, which by default flags an empty list).
   #
   #   parse(html) -> [record]
-  #   parse_page(html) -> ParsedPage   # what ScrapeFlow calls
+  #   follow_ups -> [FollowUp]                      # fetched after the page
+  #   parse_page(html, follow_ups:) -> ParsedPage   # what ScrapeFlow calls
   #
   # parse_page wraps parse with no filters; a parser whose page also offers
-  # search filters overrides it.
+  # search filters, or isn't a list, overrides it. `follow_ups` maps each
+  # declared FollowUp#name to its response body, or nil when that request
+  # failed; parsers that declare none ignore it.
   #
   # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (Sections),
   # Booking::SearchParser (Properties). A parser is site-specific and owned by a Site.
@@ -16,7 +19,10 @@ module Scraper
       raise NotImplementedError, "#{self.class} must implement #parse"
     end
 
-    def parse_page(html)
+    # The requests to make after the page, in order. None by default.
+    def follow_ups = []
+
+    def parse_page(html, follow_ups: {})
       ParsedPage.new(results: parse(html), filters: nil)
     end
 
