@@ -193,7 +193,7 @@ RSpec.describe "GET /api/v1/nissei/home", type: :request do
       [fields["event"], JSON.parse(fields["data"])]
     end
     expect(events.map(&:first)).to eq(%w[fast_path follow_up done])
-    expect(events[1].last).to eq("name" => "carousels")
+    expect(events[1].last).to include("name" => "carousels")
     expect(events.last.last["results"]["carousels"].keys).to eq(carousel_keys)
   end
 end

@@ -189,11 +189,14 @@ report whether the parse itself can be trusted (§7).
 To watch it as it happens, ask for a stream (`Accept: text/event-stream` or `?stream=true`):
 
 ```
-+0.2s   event: fast_path  {"attempt":1,"clearance":false}
-+0.2s   event: solving    {"kind":"cloudflare_js"}
-+14.9s  event: fast_path  {"attempt":2,"clearance":true}
-+15.3s  event: done       { …the same body as the JSON endpoint… }
+event: fast_path  {"attempt":1,"clearance":false,"elapsed_ms":210}
+event: solving    {"kind":"cloudflare_js","elapsed_ms":215}
+event: fast_path  {"attempt":2,"clearance":true,"elapsed_ms":14890}
+event: done       { …the same body as the JSON endpoint…, "elapsed_ms":15300 }
 ```
+
+Every event carries `elapsed_ms` since the stream began, so the gap between two events is how long
+that step took (above: the solve took ~14.7s).
 
 `/home` adds a `follow_up {"name":"carousels"}` event before `done`, for its second request.
 
