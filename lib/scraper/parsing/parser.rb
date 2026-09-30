@@ -13,6 +13,13 @@ module Scraper
   # declared FollowUp#name to its response body, or nil when that request
   # failed; parsers that declare none ignore it.
   #
+  # So a parser is more than a reader: each FollowUp it declares is one more
+  # request to the site on every scrape of its endpoint (ScrapeFlow makes
+  # them; the parser only says which). It lives here because the request is
+  # knowledge about the page, like a selector. If a follow-up ever needs the
+  # page's HTML to build its path, or is shared between parsers, split the
+  # request side out rather than growing this interface.
+  #
   # Impls: Nissei::SearchParser (Products + Filters), Nissei::HomeParser (a Home),
   # Booking::SearchParser (Properties). A parser is site-specific and chosen per
   # endpoint by its controller action.
