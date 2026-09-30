@@ -270,9 +270,17 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
       get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
       done = sse_events.last.last
 
-      expect(done.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "coverage", "degraded")
+      expect(done.keys).to contain_exactly("site", "results", "filters", "browser_used", "latency_ms", "coverage", "degraded", "elapsed_ms")
       expect(done).to include("site" => "nissei", "browser_used" => true)
       expect(done["results"].first).to include("title" => "PlayStation 5 Console", "position" => 1)
+    end
+
+    it "stamps every event with the milliseconds elapsed since the stream began" do
+      get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
+      elapsed = sse_events.map { |_, data| data["elapsed_ms"] }
+
+      expect(elapsed).to all(be_an(Integer))
+      expect(elapsed).to eq(elapsed.sort)
     end
 
     it "streams a warm request as fast_path -> done, without a solving step" do
@@ -292,7 +300,7 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
         get "/api/v1/nissei/search", params: { q: "ps5", stream: "true" }
 
         expect(sse_events.map(&:first)).to eq(%w[fast_path solving fast_path error])
-        expect(sse_events.last.last).to eq("error" => "retry_budget_exhausted", "status" => 502)
+        expect(sse_events.last.last).to include("error" => "retry_budget_exhausted", "status" => 502)
       end
     end
 
