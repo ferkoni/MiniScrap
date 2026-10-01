@@ -20,8 +20,10 @@ module Api
       # background refresh-ahead solves report to the Rails log. With
       # REDIS_URL the cache and its single-flight lock are shared by every
       # process (so Puma may run workers, and several hosts may share it);
-      # without, they live in this process's memory.
-      def self.build_clearance_store(redis_url: ENV["REDIS_URL"])
+      # without, they live in this process's memory. SCRAPER_MAX_SOLVES caps
+      # the browser solves this process runs at once; past it, a request that
+      # needs a solve gets a 503 at once instead of holding a thread.
+      def self.build_clearance_store(redis_url: ENV["REDIS_URL"], max_solves: Integer(ENV.fetch("SCRAPER_MAX_SOLVES", "2"), 10))
         backend = if redis_url
           Scraper::ClearanceStore::RedisBackend.new(redis: Redis.new(url: redis_url))
         else
@@ -39,7 +41,8 @@ module Api
             )
           ),
           backend: backend,
-          logger: Rails.logger
+          logger: Rails.logger,
+          max_solves: max_solves
         )
       end
 
@@ -60,6 +63,7 @@ module Api
       # entry here, never a change to the Rails-free core.
       ERROR_STATUS = {
         Scraper::UnsupportedChallenge => :not_implemented,
+        Scraper::SolverBusy => :service_unavailable,
         Scraper::RetryBudgetExhausted => :bad_gateway,
         Scraper::FetchFailed => :bad_gateway,
         Scraper::SolveFailed => :bad_gateway,

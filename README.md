@@ -231,7 +231,8 @@ challenge script has earned its token, so the browser is kept running 10s longer
 
 An unrecognised protection raises `UnsupportedChallenge`, which is a `501`, rather than failing
 silently. Other failures map to honest statuses: `502` for `solve_failed`, `retry_budget_exhausted`
-or `fetch_failed`, and `504` for `solve_timeout`.
+or `fetch_failed`, `504` for `solve_timeout`, and `503` for `solver_busy` (every solve slot taken,
+see `SCRAPER_MAX_SOLVES`).
 
 The parser uses **layered selectors** (a primary selector with fallbacks for every field) and emits
 a source-agnostic shape. nissei's promo labels ("Solo Online", "Delivery Gratis") become
@@ -450,6 +451,7 @@ again.**
 | `PORT` | `3000` | the Puma port |
 | `REDIS_URL` | unset | share the clearance cache + single-flight lock across processes (allows `WEB_CONCURRENCY`) |
 | `SCRAPER_PROXIES` | unset | comma-separated egress proxies, round-robin; each gets its own clearance |
+| `SCRAPER_MAX_SOLVES` | `2` | browser solves one process runs at once; past it a request needing a solve gets `503 solver_busy` |
 
 `GET /ready` reports whether curl-impersonate and FlareSolverr are both usable (`200` or `503`,
 naming each check).
@@ -464,6 +466,7 @@ Background refresh-ahead solves (XFetch) don't appear in any response. Look for
 | `502 {"error":"fetch_failed"}` | curl-impersonate isn't at `CURL_IMPERSONATE_DIR`, or the site is unreachable |
 | `502 {"error":"solve_failed"}` mentioning *Connection refused* | FlareSolverr isn't running, or isn't at `FLARESOLVERR_URL` |
 | `504 {"error":"solve_timeout"}` | FlareSolverr couldn't clear the challenge within 60s |
+| `503 {"error":"solver_busy"}` | `SCRAPER_MAX_SOLVES` solves were already running in this process; retry shortly |
 | `502 {"error":"retry_budget_exhausted"}` | a fresh clearance was still challenged, usually because FlareSolverr's Chrome version and the curl-impersonate profile drifted too far apart (see §3) |
 | `200` with `"degraded":[…]` | the page loaded but the parse broke a coverage rule (e.g. `results` empty, or a field missing on every result); the site's layout may have changed (see §7) |
 

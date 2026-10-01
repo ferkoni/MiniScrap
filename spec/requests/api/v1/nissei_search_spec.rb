@@ -223,6 +223,19 @@ RSpec.describe "GET /api/v1/nissei/search", type: :request do
     end
   end
 
+  context "when every solve slot is taken" do
+    let(:responses) { [challenged] }
+    let(:store) { Scraper::ClearanceStore.new(registry: registry, max_solves: 0) }
+
+    it "returns 503 solver_busy without solving" do
+      get "/api/v1/nissei/search", params: { q: "ps5" }
+
+      expect(response).to have_http_status(:service_unavailable)
+      expect(response.parsed_body).to eq("error" => "solver_busy")
+      expect(solver.calls).to eq(0)
+    end
+  end
+
   context "when the fetch is challenged and no solver is registered" do
     let(:registry) { Scraper::SolverRegistry.new }
     let(:responses) { [challenged] }

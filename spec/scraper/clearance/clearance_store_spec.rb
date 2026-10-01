@@ -200,6 +200,74 @@ RSpec.shared_examples "a clearance store" do
     end
   end
 
+  # The per-process cap on concurrent solves: a leader with no free slot fails
+  # fast with SolverBusy instead of queueing behind a minute-long solve.
+  describe "solve cap" do
+    let(:clearance) { Scraper::Clearance.new(cookies: { "cf_clearance" => "solved" }, headers: {}, ua: "UA", expires_at: now + 1800) }
+    let(:gated) { GatedSolver.new(-> { clearance }) }
+    let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock, max_solves: 1) }
+    let(:other) { Scraper::ClearanceKey.new(site_id: "other") }
+
+    def in_flight(key)
+      thread = Thread.new { store.clearance(key, url, challenge) }
+      expect(gated.wait_until_entered).to be(true)
+      thread
+    end
+
+    it "fails a solve for another key fast while every slot is taken, without solving" do
+      leader = in_flight(key)
+
+      expect { store.clearance(other, url, challenge) }.to raise_error(Scraper::SolverBusy)
+      expect(gated.calls).to eq(1)
+      expect(store.peek(other)).to be_nil
+
+      gated.release
+      expect(leader.value).to eq(clearance)
+    end
+
+    it "lets a same-key caller wait on the in-flight solve, which takes no slot of its own" do
+      joined = Concurrent::Event.new
+      allow(backend).to receive(:join).and_wrap_original do |original, *args|
+        original.call(*args).tap { |flight| joined.set if flight }
+      end
+      leader = in_flight(key)
+      waiter = Thread.new { store.clearance(key, url, challenge) }
+      expect(joined.wait(GatedSolver::WAIT)).to be(true)
+
+      gated.release
+      expect([leader, waiter].map(&:value)).to all(eq(clearance))
+      expect(gated.calls).to eq(1)
+    end
+
+    it "frees the slot when the solve finishes" do
+      gated.release
+      store.clearance(key, url, challenge)
+
+      gated.release
+      expect(store.clearance(other, url, challenge)).to eq(clearance)
+      expect(gated.calls).to eq(2)
+    end
+
+    context "when the solve fails" do
+      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveFailed }, -> { clearance }) }
+
+      it "frees the slot too" do
+        gated.release
+        expect { store.clearance(key, url, challenge) }.to raise_error(Scraper::SolveFailed)
+
+        gated.release
+        expect(store.clearance(other, url, challenge)).to eq(clearance)
+      end
+    end
+
+    it "lets no slot at all (max_solves 0) refuse every solve" do
+      store = described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock, max_solves: 0)
+
+      expect { store.clearance(key, url, challenge) }.to raise_error(Scraper::SolverBusy)
+      expect(gated.calls).to eq(0)
+    end
+  end
+
   # Proactive refresh-ahead (XFetch, Vattani et al. VLDB 2015): a read of a
   # still-valid clearance may start a background re-solve ahead of expiry, so
   # active traffic never pays the periodic cold hit. The gate fires when

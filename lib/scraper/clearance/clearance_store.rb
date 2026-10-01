@@ -26,6 +26,12 @@ module Scraper
   # it never blocks the reader, who is served the current clearance. Nobody
   # waits on it, so it reports to the logger rather than to any response.
   # XFetch only anticipates scheduled expiry; early death stays reactive.
+  #
+  # Capped: at most `max_solves` solves (reactive or refresh-ahead) run at
+  # once in this process, each holding a browser for up to a minute. A leader
+  # that finds every slot taken raises SolverBusy at once, and so does every
+  # waiter on its flight, rather than queueing. Only leaders take a slot:
+  # waiters on an in-flight solve cost nothing extra.
   class ClearanceStore
     # A cached clearance plus what it takes to refresh it: the measured solve
     # cost (XFetch's delta, in seconds) and the challenge it cleared (to route
@@ -38,8 +44,9 @@ module Scraper
     # process) or RedisBackend (shared by every process). beta scales how early
     # refreshes start (0 disables refresh-ahead). rand must return a value in
     # (0, 1]. executor runs background refreshes (Concurrent::Promises
-    # executor; :immediate makes them synchronous).
-    def initialize(registry:, backend: MemoryBackend.new, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil))
+    # executor; :immediate makes them synchronous). max_solves caps concurrent
+    # solves in this process (nil: no cap).
+    def initialize(registry:, backend: MemoryBackend.new, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil), max_solves: nil)
       @registry = registry
       @backend = backend
       @clock = clock
@@ -47,6 +54,7 @@ module Scraper
       @rand = rand
       @executor = executor
       @logger = logger
+      @solve_slots = max_solves && Concurrent::Semaphore.new(max_solves)
     end
 
     # The cached clearance if it is still valid; never solves, never blocks.
@@ -68,8 +76,8 @@ module Scraper
 
     # A valid clearance for the key: the cached one, or the outcome of a solve
     # (routed by the challenge's kind) that this caller leads or joins. Raises
-    # the solve's error — UnsupportedChallenge, SolveFailed, SolveTimeout —
-    # to the leader and every waiter alike, caching nothing.
+    # the solve's error — UnsupportedChallenge, SolverBusy, SolveFailed,
+    # SolveTimeout — to the leader and every waiter alike, caching nothing.
     def clearance(key, url, challenge)
       loop do
         cached = peek(key)
@@ -124,7 +132,7 @@ module Scraper
       end
 
       started = @clock.call
-      clearance = solver.solve(url, challenge, **{ proxy: key.proxy }.compact) # no proxy: the plain call
+      clearance = with_solve_slot { solver.solve(url, challenge, **{ proxy: key.proxy }.compact) } # no proxy: the plain call
       finished = @clock.call
       @backend.write(key, Entry.new(clearance: clearance, delta: finished - started, challenge: challenge),
         ttl: clearance.expires_at - finished)
@@ -135,6 +143,20 @@ module Scraper
       raise
     ensure
       flight.finish
+    end
+
+    # Runs one solve in a free slot, or raises SolverBusy when there is none:
+    # failing fast beats queueing a request behind solves that can take a
+    # minute.
+    def with_solve_slot
+      return yield unless @solve_slots
+      raise SolverBusy unless @solve_slots.try_acquire
+
+      begin
+        yield
+      ensure
+        @solve_slots.release
+      end
     end
   end
 end
