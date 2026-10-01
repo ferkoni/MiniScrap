@@ -204,7 +204,7 @@ The streaming variant was added **without touching the core**. `ScrapeFlow` narr
 `EventSink` and still *returns* its result; only the edge decides whether that becomes one JSON body
 or a stream.
 
-## 6. The shape: one site today, many tomorrow
+## 6. The shape: two sites today, more tomorrow
 
 The scraping core is plain Ruby under `lib/scraper/`, and Rails only appears in the controllers.
 The orchestrator names only interfaces and contains no `if site == …` or `if cloudflare`:
@@ -310,9 +310,12 @@ and a label the card doesn't show is `null`, not `false`.
   clearance is bound to its egress IP.
 - **Browsers as a pool, not a container.** One FlareSolverr is enough at this volume. At scale:
   a pool of browser workers behind a queue, sized by solve rate rather than request rate.
-- **Interactive challenges.** Click-required Turnstile or reCAPTCHA can't be solved by FlareSolverr.
-  They'd route, via a new challenge kind, to a paid solver (CapSolver, 2captcha). The registry is
-  the seam; it isn't built.
+- **Puzzle CAPTCHAs.** Cloudflare's one-click "Verify you are human" checkbox is not the limit:
+  FlareSolverr presses it itself (Tab, then Space) when the challenge page doesn't clear on its
+  own, and nissei's challenge does show it. A FlareSolverr debug log confirmed the click, and the
+  solve passed. What's out of reach is a puzzle: reCAPTCHA or hCaptcha image grids, AWS WAF's
+  CAPTCHA, sliders. Those would route, via a new challenge kind, to a paid solver (CapSolver,
+  2captcha). The registry is the seam; it isn't built, and won't be (see *Ethics*).
 - **Fast-path-first costs one doomed request on a cold start.** nissei always challenges, so a
   per-site `always_challenges?` flag could skip it. With refresh-ahead keeping busy sites warm,
   cold starts are rare enough that I left it out.
@@ -335,23 +338,41 @@ and a label the card doesn't show is `null`, not `false`.
   traffic. A cap that's too long costs one challenged fast fetch, then a fresh solve.
 - A visible CAPTCHA (as opposed to the silent challenge) can't be solved and isn't attempted: the
   solve returns no token and the API answers `502 solve_failed`.
+- nissei's checkbox is passed by a scripted key press (FlareSolverr tabs to it and presses Space).
+  If Cloudflare moves the checkbox or starts rejecting keyboard-only clicks, cold solves fail
+  until FlareSolverr catches up; warm requests keep working until the clearance expires.
+- **`/home` has not been run through the fast path yet.** Its two fixtures are browser captures:
+  the page saved from a browser, and the carousels' endpoint response captured in a private
+  window. The live capture through curl-impersonate was blocked (Cloudflare refused the solve's IP
+  that day), so it's still open whether the carousels' endpoint answers the fast path with the
+  clearance cookies alone, or also wants the page's session cookie. If it doesn't, `/home` still
+  returns `200` with the categories and flags the carousels in `degraded`.
 
 ## Ethics and the target site
 
 nissei is a real commercial site, and getting past its Cloudflare challenge touches its terms of
-service. This is a private, read-only, **low-volume** practice project in the same dual-use space
-that scraping APIs operate in commercially. Live traffic is kept to a trickle: tests run offline
-against saved pages, and a live solve is a single, opt-in spec.
+service. MiniScrap is a read-only, **low-volume** learning project in the same dual-use space that
+scraping APIs operate in commercially. It isn't a service and doesn't run against these sites on
+a schedule. Live traffic is kept to a trickle: every test runs offline against saved pages, and a
+live solve is a single, opt-in spec that CI never runs.
 
 Booking's terms explicitly forbid automated access, a bigger step than nissei. Its fixtures come
 from one live test of 4 page loads (a challenged fetch, two FlareSolverr solves, one warm fetch),
 with no user cookies and no tracking params, and were scrubbed of session ids. There is no live
 Booking spec; the same trickle rule applies.
 
-*On naming the site:* this README names nissei openly because the repo is private and the code
-itself is site-specific (`NisseiController`, `BookingController`, the `Scraper::Nissei` and
-`Scraper::Booking` parsers, fixtures). A public release should
-revisit that and anonymize both the prose and the site-specific code.
+What it deliberately doesn't do:
+- **No CAPTCHA solving.** Only challenges a real browser passes on its own, or with a single
+  click, are handled. Puzzles meant for people are out of scope, and so are paid solving services.
+- **No personal data.** Only public catalogue and listing pages are read: no accounts, no logins,
+  no user content.
+- **Nothing sensitive in the repo.** Fixtures are scrubbed of cookies, session ids and tracking
+  ids.
+
+*On naming the sites:* the README names nissei and Booking because the code is site-specific
+(`NisseiController`, `BookingController`, the `Scraper::Nissei` and `Scraper::Booking` parsers,
+fixtures), and the concrete details are the point: a real challenge, measured against a real
+site. If you run it, keep to the same trickle, and read each site's terms first.
 
 ---
 
