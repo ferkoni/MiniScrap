@@ -3,6 +3,6 @@ module Scraper
   # controller maps to HTTP status codes. Failures are *raised*, never returned:
   # the core stays output-medium-agnostic and the edge owns the status mapping.
   # Subclasses: UnsupportedChallenge, RetryBudgetExhausted, FetchFailed,
-  # SolveFailed, SolveTimeout.
+  # SolverBusy, SolveFailed, SolveTimeout.
   class Error < StandardError; end
 end

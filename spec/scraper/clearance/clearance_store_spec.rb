@@ -170,7 +170,9 @@ RSpec.shared_examples "a clearance store" do
     end
 
     context "when the leader's solve fails" do
-      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveFailed }, -> { clearance }) }
+      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveFailed, "FlareSolverr: Cloudflare has blocked this request" }, -> { clearance }) }
+      let(:times) { [now] }
+      let(:clock) { -> { times.last } }
 
       def failed_burst
         threads = stampede(herd)
@@ -185,18 +187,140 @@ RSpec.shared_examples "a clearance store" do
         expect(gated.calls).to eq(1)
       end
 
-      it "caches nothing" do
+      it "caches no clearance" do
         failed_burst
         expect(store.peek(key)).to be_nil
       end
 
-      it "lets the next request after the burst attempt a fresh solve" do
+      # A site that just refused a solve isn't asked again at once.
+      it "remembers the failure: a request within failure_ttl raises it without solving" do
         failed_burst
+        times << now + 59
+
+        expect { store.clearance(key, url, challenge) }
+          .to raise_error(Scraper::SolveFailed, /Cloudflare has blocked this request.*remembered/)
+        expect(gated.calls).to eq(1)
+      end
+
+      it "remembers it per key" do
+        failed_burst
+        gated.release
+
+        expect(store.clearance(Scraper::ClearanceKey.new(site_id: "other"), url, challenge)).to eq(clearance)
+      end
+
+      it "lets the first request after failure_ttl attempt a fresh solve" do
+        failed_burst
+        times << now + 60
         gated.release
 
         expect(store.clearance(key, url, challenge)).to eq(clearance)
         expect(gated.calls).to eq(2)
       end
+
+      context "with failure_ttl 0" do
+        let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock, failure_ttl: 0) }
+
+        it "remembers nothing: the next request solves again" do
+          failed_burst
+          gated.release
+
+          expect(store.clearance(key, url, challenge)).to eq(clearance)
+          expect(gated.calls).to eq(2)
+        end
+      end
+    end
+
+    context "when the leader's solve times out" do
+      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveTimeout }) }
+
+      it "remembers the timeout as a timeout" do
+        thread = stampede(1).first
+        gated.release
+        expect(thread.value).to be_a(Scraper::SolveTimeout)
+
+        expect { store.clearance(key, url, challenge) }.to raise_error(Scraper::SolveTimeout)
+        expect(gated.calls).to eq(1)
+      end
+    end
+  end
+
+  # The per-process cap on concurrent solves: a leader with no free slot fails
+  # fast with SolverBusy instead of queueing behind a minute-long solve.
+  describe "solve cap" do
+    let(:clearance) { Scraper::Clearance.new(cookies: { "cf_clearance" => "solved" }, headers: {}, ua: "UA", expires_at: now + 1800) }
+    let(:gated) { GatedSolver.new(-> { clearance }) }
+    let(:store) { described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock, max_solves: 1) }
+    let(:other) { Scraper::ClearanceKey.new(site_id: "other") }
+
+    def in_flight(key)
+      thread = Thread.new { store.clearance(key, url, challenge) }
+      expect(gated.wait_until_entered).to be(true)
+      thread
+    end
+
+    it "fails a solve for another key fast while every slot is taken, without solving" do
+      leader = in_flight(key)
+
+      expect { store.clearance(other, url, challenge) }.to raise_error(Scraper::SolverBusy)
+      expect(gated.calls).to eq(1)
+      expect(store.peek(other)).to be_nil
+
+      gated.release
+      expect(leader.value).to eq(clearance)
+    end
+
+    it "lets a same-key caller wait on the in-flight solve, which takes no slot of its own" do
+      joined = Concurrent::Event.new
+      allow(backend).to receive(:join).and_wrap_original do |original, *args|
+        original.call(*args).tap { |flight| joined.set if flight }
+      end
+      leader = in_flight(key)
+      waiter = Thread.new { store.clearance(key, url, challenge) }
+      expect(joined.wait(GatedSolver::WAIT)).to be(true)
+
+      gated.release
+      expect([leader, waiter].map(&:value)).to all(eq(clearance))
+      expect(gated.calls).to eq(1)
+    end
+
+    it "frees the slot when the solve finishes" do
+      gated.release
+      store.clearance(key, url, challenge)
+
+      gated.release
+      expect(store.clearance(other, url, challenge)).to eq(clearance)
+      expect(gated.calls).to eq(2)
+    end
+
+    context "when the solve fails" do
+      let(:gated) { GatedSolver.new(-> { raise Scraper::SolveFailed }, -> { clearance }) }
+
+      it "frees the slot too" do
+        gated.release
+        expect { store.clearance(key, url, challenge) }.to raise_error(Scraper::SolveFailed)
+
+        gated.release
+        expect(store.clearance(other, url, challenge)).to eq(clearance)
+      end
+    end
+
+    # Busy is this process's load, not the site's answer.
+    it "doesn't remember SolverBusy as a failure" do
+      leader = in_flight(key)
+      expect { store.clearance(other, url, challenge) }.to raise_error(Scraper::SolverBusy)
+      gated.release
+      leader.join
+
+      gated.release
+      expect(store.clearance(other, url, challenge)).to eq(clearance)
+    end
+
+    it "lets no slot at all (max_solves 0) refuse every solve" do
+      store = described_class.new(registry: Scraper::SolverRegistry.new(cloudflare_js: gated), backend: backend, clock: clock, max_solves: 0)
+
+      expect { store.clearance(key, url, challenge) }.to raise_error(Scraper::SolverBusy)
+      expect(gated.calls).to eq(0)
     end
   end
 
@@ -295,6 +419,13 @@ RSpec.shared_examples "a clearance store" do
         expect(read_at(expires_at - cost).cookies).to eq("cf_clearance" => "v1")
         expect(store.peek(key).cookies).to eq("cf_clearance" => "v1")
         expect(log.string).to include("refresh-ahead failed", "boom")
+      end
+
+      it "holds off the next refresh while the failure is remembered" do
+        read_at(expires_at - cost)
+        read_at(expires_at - cost + 1)
+
+        expect(timed_solver).to have_received(:solve).once
       end
     end
 
