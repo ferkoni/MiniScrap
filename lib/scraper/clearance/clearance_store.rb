@@ -10,9 +10,16 @@ module Scraper
   # first becomes the leader and solves; the rest wait on its in-flight solve
   # and share the outcome — one browser for the whole herd. If the solve fails,
   # every waiter raises the leader's error rather than promoting itself to
-  # leader (a retry storm), and nothing is cached, so the next request after
-  # the burst starts a fresh attempt. Only the short bookkeeping runs under the
-  # guard; the solve itself does not, so different keys solve in parallel.
+  # leader (a retry storm), and no clearance is cached. Only the short
+  # bookkeeping runs under the guard; the solve itself does not, so different
+  # keys solve in parallel.
+  #
+  # A failed solve is remembered: when the solver reports SolveFailed or
+  # SolveTimeout (FlareSolverr down, the site refusing the IP), the key's
+  # next requests re-raise that error for `failure_ttl` seconds without
+  # solving, and refresh-ahead holds off too. A site that just refused a
+  # solve isn't asked again at once, and a burst doesn't pay for a doomed
+  # attempt each time. After the window, the next request tries afresh.
   #
   # Proactive refresh-ahead (XFetch — Vattani et al., "Optimal Probabilistic
   # Cache Stampede Prevention", VLDB 2015): a read that passes `refresh_url`
@@ -38,6 +45,19 @@ module Scraper
     # the re-solve).
     Entry = Data.define(:clearance, :delta, :challenge)
 
+    # A failed solve, re-raised for its key until expires_at. Holds the error's
+    # class and message, not the error, so it can cross processes and every
+    # caller raises an error of its own.
+    Failure = Data.define(:error_class, :message, :expires_at) do
+      def valid_at?(time)
+        time < expires_at
+      end
+
+      def error
+        error_class.new("#{message} (remembered: no new solve before #{expires_at.utc.iso8601})")
+      end
+    end
+
     attr_reader :registry, :backend
 
     # backend: where entries and in-flight solves live — MemoryBackend (one
@@ -45,8 +65,10 @@ module Scraper
     # refreshes start (0 disables refresh-ahead). rand must return a value in
     # (0, 1]. executor runs background refreshes (Concurrent::Promises
     # executor; :immediate makes them synchronous). max_solves caps concurrent
-    # solves in this process (nil: no cap).
-    def initialize(registry:, backend: MemoryBackend.new, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil), max_solves: nil)
+    # solves in this process (nil: no cap). failure_ttl is how many seconds a
+    # failed solve is remembered (0: not at all).
+    def initialize(registry:, backend: MemoryBackend.new, clock: -> { Time.now }, beta: 1.0, rand: -> { 1.0 - Random.rand }, executor: :io, logger: Logger.new(nil),
+                   max_solves: nil, failure_ttl: 60)
       @registry = registry
       @backend = backend
       @clock = clock
@@ -55,6 +77,7 @@ module Scraper
       @executor = executor
       @logger = logger
       @solve_slots = max_solves && Concurrent::Semaphore.new(max_solves)
+      @failure_ttl = failure_ttl
     end
 
     # The cached clearance if it is still valid; never solves, never blocks.
@@ -77,11 +100,16 @@ module Scraper
     # A valid clearance for the key: the cached one, or the outcome of a solve
     # (routed by the challenge's kind) that this caller leads or joins. Raises
     # the solve's error — UnsupportedChallenge, SolverBusy, SolveFailed,
-    # SolveTimeout — to the leader and every waiter alike, caching nothing.
+    # SolveTimeout — to the leader and every waiter alike, caching no
+    # clearance. While a failed solve is remembered, raises its error without
+    # solving.
     def clearance(key, url, challenge)
       loop do
         cached = peek(key)
         return cached if cached
+
+        failure = recent_failure(key)
+        raise failure.error if failure
 
         solver = @registry.for(challenge) # an unrouted kind fails before any flight
         if (flight = @backend.lead(key))
@@ -107,8 +135,11 @@ module Scraper
     end
 
     # Starts a background re-solve unless one is already in flight for the key
-    # (then it simply rides that one). Never waits on it.
+    # (then it simply rides that one) or the last solve for the key failed
+    # recently. Never waits on it.
     def refresh_ahead(key, url, entry)
+      return if recent_failure(key)
+
       flight = @backend.lead(key)
       return unless flight
 
@@ -123,16 +154,21 @@ module Scraper
 
     # The leader's half: run the one solve, publish its outcome to the flight
     # (waking every waiter, in this process or another), then retire it. A
-    # reactive leader first re-checks the cache — a solve may have landed while
-    # it raced for the flight; a refresh-ahead leader must solve regardless.
+    # reactive leader first re-checks the cache — a solve may have landed, or
+    # failed, while it raced for the flight; a refresh-ahead leader must solve
+    # regardless.
     def lead(key, url, challenge, solver, flight, refreshing: false)
-      if !refreshing && (cached = peek(key))
-        flight.fulfill(cached)
-        return cached
+      unless refreshing
+        if (cached = peek(key))
+          flight.fulfill(cached)
+          return cached
+        end
+        failure = recent_failure(key)
+        raise failure.error if failure
       end
 
       started = @clock.call
-      clearance = with_solve_slot { solver.solve(url, challenge, **{ proxy: key.proxy }.compact) } # no proxy: the plain call
+      clearance = solve(key, url, challenge, solver)
       finished = @clock.call
       @backend.write(key, Entry.new(clearance: clearance, delta: finished - started, challenge: challenge),
         ttl: clearance.expires_at - finished)
@@ -143,6 +179,28 @@ module Scraper
       raise
     ensure
       flight.finish
+    end
+
+    # The key's failed solve, while it is still remembered.
+    def recent_failure(key)
+      failure = @backend.read_failure(key)
+      failure if failure&.valid_at?(@clock.call)
+    end
+
+    # Runs the solve, remembering a failure the solver reports. SolverBusy is
+    # this process's own load, not the site's answer, so it isn't remembered.
+    def solve(key, url, challenge, solver)
+      with_solve_slot { solver.solve(url, challenge, **{ proxy: key.proxy }.compact) } # no proxy: the plain call
+    rescue SolveFailed, SolveTimeout => error
+      remember_failure(key, error)
+      raise
+    end
+
+    def remember_failure(key, error)
+      return unless @failure_ttl.positive?
+
+      failure = Failure.new(error_class: error.class, message: error.message, expires_at: @clock.call + @failure_ttl)
+      @backend.write_failure(key, failure, ttl: @failure_ttl)
     end
 
     # Runs one solve in a free slot, or raises SolverBusy when there is none:

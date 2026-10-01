@@ -2,11 +2,12 @@ module Scraper
   class ClearanceStore
     # Keeps entries and in-flight solves in this process's memory: the
     # single-process backend (development, tests, and a one-process deploy).
-    # Entries live in a Concurrent::Map; each in-flight solve is a
-    # Concurrent::Promises future that waiters block on.
+    # Entries and remembered failures live in Concurrent::Maps; each in-flight
+    # solve is a Concurrent::Promises future that waiters block on.
     class MemoryBackend
       def initialize
         @entries = Concurrent::Map.new
+        @failures = Concurrent::Map.new
         @flights = {}
         @guard = Mutex.new
       end
@@ -24,6 +25,15 @@ module Scraper
       # Atomic compare-and-delete.
       def delete_if_current(key, clearance)
         @entries.compute_if_present(key) { |entry| entry unless entry.clearance == clearance }
+      end
+
+      def read_failure(key)
+        @failures[key]
+      end
+
+      # Like #write, validity is checked on read, so the ttl is not needed.
+      def write_failure(key, failure, ttl: nil)
+        @failures[key] = failure
       end
 
       # Becomes the leader of the key's flight, or nil if one is in flight.

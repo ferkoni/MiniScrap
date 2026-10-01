@@ -80,6 +80,19 @@ RSpec.describe Scraper::ClearanceStore::RedisBackend, :redis do
       expect(failing.calls).to eq(1)
       expect(store_b.peek(key)).to be_nil
     end
+
+    it "remembers a failure solved in one process for the other" do
+      failing = GatedSolver.new(-> { raise Scraper::SolveFailed, "FlareSolverr unavailable" }, -> { clearance })
+      store_a, = process(failing)
+      store_b, = process(failing)
+
+      leader = herd(store_a, 1)
+      failing.release
+      expect(leader.first.value).to be_a(Scraper::SolveFailed)
+
+      expect { store_b.clearance(key, url, challenge) }.to raise_error(Scraper::SolveFailed, /FlareSolverr unavailable.*remembered/)
+      expect(failing.calls).to eq(1)
+    end
   end
 
   # A leader that dies mid-solve (its process killed) never publishes an
@@ -152,6 +165,15 @@ RSpec.describe Scraper::ClearanceStore::RedisBackend, :redis do
       backend.write(key, Scraper::ClearanceStore::Entry.new(clearance: clearance, delta: 1.0, challenge: challenge), ttl: 42)
 
       expect(redis.pttl(redis.keys("#{redis_namespace}:clearance:*").first)).to be_between(41_000, 42_000)
+    end
+
+    it "round-trips a remembered failure and expires it with its ttl" do
+      backend = redis_backend
+      failure = Scraper::ClearanceStore::Failure.new(error_class: Scraper::SolveTimeout, message: "slow", expires_at: now + 60)
+      backend.write_failure(key, failure, ttl: 60)
+
+      expect(backend.read_failure(key)).to eq(failure)
+      expect(redis.pttl(redis.keys("#{redis_namespace}:failure:*").first)).to be_between(59_000, 60_000)
     end
 
     # Proxy URLs carry credentials; keys are visible to anyone with Redis access.

@@ -16,6 +16,7 @@ module Scraper
     #   leader's error rather than promoting themselves (no retry storm).
     # * A crashed leader never publishes: its lock expires after lock_ttl and
     #   its waiters fail with SolveFailed; the next request leads afresh.
+    # * Remembered failures: a JSON value per key, expiring with the failure.
     #
     # Proxy URLs can carry credentials, so the proxy part of a key is hashed.
     class RedisBackend
@@ -71,6 +72,16 @@ module Scraper
         end
       end
 
+      def read_failure(key)
+        raw = @redis.get(failure_key(key))
+        Codec.load_failure(raw) if raw
+      end
+
+      # ttl: seconds the failure is remembered; Redis drops it then.
+      def write_failure(key, failure, ttl:)
+        @redis.set(failure_key(key), Codec.dump_failure(failure), px: (ttl * 1000).ceil)
+      end
+
       def delete_if_current(key, clearance)
         @redis.eval(DELETE_IF_CURRENT, keys: [entry_key(key)], argv: [Codec.dump_clearance(clearance)])
       end
@@ -118,6 +129,10 @@ module Scraper
 
       def lock_key(key)
         "#{@namespace}:flight:#{id(key)}"
+      end
+
+      def failure_key(key)
+        "#{@namespace}:failure:#{id(key)}"
       end
 
       def outcome_key(token)
@@ -188,19 +203,7 @@ module Scraper
         def resolve(outcome)
           return Codec.load_clearance(outcome.fetch("clearance")) if outcome.key?("clearance")
 
-          raise error_for(outcome.fetch("error"), outcome.fetch("message"))
-        end
-
-        # Re-raises the leader's error class when it is a Scraper::Error that
-        # takes a message (UnsupportedChallenge never crosses: the registry
-        # rejects it before any flight); anything else becomes SolveFailed.
-        def error_for(name, message)
-          klass = name.to_s.safe_constantize
-          if klass.is_a?(Class) && klass < Error && klass != UnsupportedChallenge
-            klass.new(message)
-          else
-            SolveFailed.new(message)
-          end
+          raise Codec.load_error_class(outcome.fetch("error")).new(outcome.fetch("message"))
         end
 
         def monotonic
@@ -235,6 +238,23 @@ module Scraper
         def load_challenge(json)
           fields = JSON.parse(json)
           Challenge.new(kind: fields["kind"].to_sym, evidence: fields["evidence"].to_h.transform_keys(&:to_sym))
+        end
+
+        def dump_failure(failure)
+          JSON.generate("error" => failure.error_class.name, "message" => failure.message, "expires_at" => failure.expires_at.utc.iso8601(9))
+        end
+
+        def load_failure(json)
+          fields = JSON.parse(json)
+          Failure.new(error_class: load_error_class(fields["error"]), message: fields["message"], expires_at: Time.iso8601(fields["expires_at"]))
+        end
+
+        # The named class when it is a Scraper::Error that takes a message
+        # (UnsupportedChallenge never crosses: the registry rejects it before
+        # any flight); anything else becomes SolveFailed.
+        def load_error_class(name)
+          klass = name.to_s.safe_constantize
+          klass.is_a?(Class) && klass < Error && klass != UnsupportedChallenge ? klass : SolveFailed
         end
       end
     end
