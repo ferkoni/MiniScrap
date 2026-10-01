@@ -8,7 +8,7 @@ module Scraper
   # the clearance is bound to the IP that solved it.
   #
   # A SolverRegistry routes each Challenge to one by its kind. Impls:
-  # StubSolver (spec/dev) and FlareSolverrSolver (a real browser, later slice).
+  # StubSolver (spec/dev) and FlareSolverrSolver (a real browser).
   module Solver
     def solve(_url, _challenge, proxy: nil)
       raise NotImplementedError, "#{self.class} must implement #solve"
