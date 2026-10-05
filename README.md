@@ -43,11 +43,13 @@ page's parts, each addressed by a stable key rather than found by searching a li
       { "title": "Fotografía y Filmación", "url": "https://nissei.com/py/fotografia-filmacion", "products": [ … ] },
       … ] },
   "browser_used": false, "latency_ms": …,             // both requests
-  "coverage": { … }, "degraded": null }
+  "coverage": { … },
+  "degraded": [ { "code": "empty", "path": "results.carousels.gift_ideas.products" } ] }
 ```
 
 - **`carousels` always has all five keys.** One nissei didn't return is `null`, so the shape is
-  the same on every request. `fallback` is nissei's own `is_fallback` flag, passed through.
+  the same on every request. Every capture so far returned all five with products, so a missing
+  one is flagged in `degraded` (§7). `fallback` is nissei's own `is_fallback` flag, passed through.
 - **`categories`** are the page's showcases, in page order. `url` is the category page the
   showcase's heading links to: a category's one identifier that isn't page text.
 - **Products** have the same shape as search's: both pages render the same card, read by one
@@ -69,8 +71,8 @@ true`). **Every request after that** reuses the result over plain HTTP (~3s, `br
 ### Booking
 
 ```
-GET /api/v1/booking/search?dest_id=-910015&dest_type=city&checkin=2026-09-30&checkout=2026-10-08&adults=2
-GET /api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&offset=15
+GET /api/v1/booking/search?dest_id=-910015&dest_type=city&checkin=2027-09-30&checkout=2027-10-08&adults=2
+GET /api/v1/booking/search?ss=Asuncion&checkin=2027-09-30&checkout=2027-10-08&offset=15
 ```
 ```jsonc
 { "site": "booking",
@@ -294,7 +296,9 @@ losing its category showcases.)
 
 Specs rename selectors in the real captured pages, the way a redesign would, and assert on the
 API body. For a required field, the rename either hits a fallback and gives the same output, or
-it's flagged. For an optional one, the spec pins the drop in `coverage`. Values also can't guess, or "missing" would mean nothing: a blank element is `null`, never `""`,
+it's flagged. For an optional one, the spec pins the drop in `coverage`.
+
+Values also can't guess, or "missing" would mean nothing: a blank element is `null`, never `""`,
 and a label the card doesn't show is `null`, not `false`.
 
 ## 8. What I deliberately scoped out, and how I'd build it at scale
@@ -343,8 +347,8 @@ and a label the card doesn't show is `null`, not `false`.
 - Booking's clearance is capped at 300s, AWS WAF's default immunity time. The token cookie claims
   4 days, and the real server-side lifetime wasn't measured, since measuring it takes sustained
   traffic. A cap that's too long costs one challenged fast fetch, then a fresh solve.
-- A visible CAPTCHA (as opposed to the silent challenge) can't be solved and isn't attempted: the
-  solve returns no token and the API answers `502 solve_failed`.
+- A puzzle CAPTCHA (an image grid or a slider, as opposed to the checkbox below) can't be solved
+  and isn't attempted: the solve returns no token and the API answers `502 solve_failed`.
 - nissei's checkbox is passed by a scripted key press (FlareSolverr tabs to it and presses Space).
   If Cloudflare moves the checkbox or starts rejecting keyboard-only clicks, cold solves fail
   until FlareSolverr catches up; warm requests keep working until the clearance expires.
@@ -385,7 +389,8 @@ site. If you run it, keep to the same trickle, and read each site's terms first.
 
 ## Running it in development
 
-**You need:** Ruby 3.4.9, Docker, and curl-impersonate. There's no database, Redis or job queue.
+**You need:** Ruby 3.4.9, Docker, and curl-impersonate. There's no database or job queue, and
+Redis is optional (§8).
 
 ### 1. Ruby and gems
 
@@ -441,7 +446,7 @@ bin/dev                     # = bin/rails server, on http://localhost:3000 (PORT
 curl 'localhost:3000/api/v1/nissei/search?q=ps5'                 # one JSON body
 curl -N 'localhost:3000/api/v1/nissei/search?q=ps5&stream=true'  # live events (-N: don't buffer)
 curl 'localhost:3000/api/v1/nissei/home'                         # home carousels + category showcases (2 requests to nissei)
-curl 'localhost:3000/api/v1/booking/search?ss=Asuncion&checkin=2026-09-30&checkout=2026-10-08&adults=2'
+curl 'localhost:3000/api/v1/booking/search?ss=Asuncion&checkin=2027-09-30&checkout=2027-10-08&adults=2'
 curl 'localhost:3000/up'                                         # health check
 ```
 
@@ -506,7 +511,8 @@ LIVE=1 bundle exec rspec spec/live    # a real curl-impersonate fetch + one real
 ```
 
 The live solver spec also refreshes `spec/fixtures/nissei/results.html`, one of the two real
-captured search pages the parser is tested against (the other is `results_smartphone.html`, whose cards carry the promo labels). Keep live runs rare (see *Ethics* above).
+captured search pages the parser is tested against (the other is `results_smartphone.html`,
+whose cards carry the promo labels). Keep live runs rare (see *Ethics* above).
 
 ## Deploying
 
